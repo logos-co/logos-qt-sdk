@@ -50,20 +50,9 @@ private:
     LogosAPI* m_logosAPI = nullptr;
 };
 
-// ---------------------------------------------------------------------------
-// LogosProviderPlugin — Qt interface for plugin loading
-//
-// New-API plugins implement this so the runtime can detect them via
-// qobject_cast<LogosProviderPlugin*>() and use createProviderObject().
-// ---------------------------------------------------------------------------
-class LogosProviderPlugin {
-public:
-    virtual ~LogosProviderPlugin() = default;
-    virtual LogosProviderObject* createProviderObject() = 0;
-};
-
-#define LogosProviderPlugin_iid "org.logos.LogosProviderPlugin"
-Q_DECLARE_INTERFACE(LogosProviderPlugin, LogosProviderPlugin_iid)
+// LogosProviderPlugin (the plugin-detection interface) now lives in
+// logos-protocol's logos_provider_interface.h, included above — it stays
+// visible to existing includers of this header.
 
 // ---------------------------------------------------------------------------
 // Macros — the developer-facing API
