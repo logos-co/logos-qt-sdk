@@ -154,7 +154,10 @@ QString lidlMakeUiGlueHeader(const ModuleDecl& module,
     s << "    Q_OBJECT\n";
     s << "    Q_PLUGIN_METADATA(IID " << cls << "Interface_iid FILE \"metadata.json\")\n";
     s << "    Q_INTERFACES(" << cls << "Interface LogosViewPlugin)\n\npublic:\n";
-    s << "    explicit " << cls << "Plugin(QObject* parent = nullptr) : " << cls << "SimpleSource(parent) {}\n";
+    s << "    // Ctor/dtor are out-of-line: the header is compiled by moc TUs\n";
+    s << "    // where LogosModules is incomplete, and an inline ctor would\n";
+    s << "    // instantiate ~unique_ptr<LogosModules> for exception cleanup.\n";
+    s << "    explicit " << cls << "Plugin(QObject* parent = nullptr);\n";
     s << "    ~" << cls << "Plugin() override;\n\n";
     s << "    QString name() const override { return QStringLiteral(\"" << module.name << "\"); }\n";
     s << "    QString version() const override { return QStringLiteral(\"" << module.version << "\"); }\n\n";
@@ -185,6 +188,7 @@ QString lidlMakeUiGlueSource(const ModuleDecl& module, const QString& implClass)
     s << "#include \"logos_api.h\"\n";
     s << "#include \"logos_module_context.h\"\n";
     s << "#include \"logos_sdk.h\"\n\n";
+    s << cls << "Plugin::" << cls << "Plugin(QObject* parent) : " << cls << "SimpleSource(parent) {}\n";
     s << cls << "Plugin::~" << cls << "Plugin() = default;\n\n";
     s << "void " << cls << "Plugin::initLogos(LogosAPI* api)\n{\n";
     s << "    if (m_logosModules || !api) return;\n";
