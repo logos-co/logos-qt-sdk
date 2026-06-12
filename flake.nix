@@ -33,6 +33,10 @@
           src = ./.;
 
           lib = import ./nix/lib.nix { inherit pkgs common src protocolLib; };
+          qtGenerator = import ./nix/qt-generator.nix {
+            inherit pkgs src;
+            cppGeneratorBin = cppGenerator;
+          };
           include = import ./nix/include.nix { inherit pkgs common src; };
           tests = import ./nix/tests.nix { inherit pkgs common src protocolLib cppGenerator; };
 
@@ -48,6 +52,7 @@
           inherit tests;
 
           logos-qt-sdk = qtSdk;
+          logos-qt-generator = qtGenerator;
           default = qtSdk;
         }
       );
