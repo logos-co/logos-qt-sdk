@@ -142,8 +142,7 @@ QString lidlMakeUiGlueHeader(const ModuleDecl& module,
     s << "#include \"" << implHeader << "\"\n";
     s << "#include \"" << module.name << "_ui_interface.h\"\n";
     s << "#include \"LogosViewPluginBase.h\"\n";
-    s << "#include \"rep_" << module.name << "_source.h\"\n";
-    s << "#include \"module_config.h\"\n\n";
+    s << "#include \"rep_" << module.name << "_source.h\"\n\n";
     s << "class LogosAPI;\nstruct LogosModules;\n\n";
     s << "// Generated UI plugin: derives the repc source (typed remoting to the\n";
     s << "// QML replica), forwards every slot to the author's impl, and wires the\n";
@@ -157,8 +156,8 @@ QString lidlMakeUiGlueHeader(const ModuleDecl& module,
     s << "    Q_INTERFACES(" << cls << "Interface LogosViewPlugin)\n\npublic:\n";
     s << "    explicit " << cls << "Plugin(QObject* parent = nullptr) : " << cls << "SimpleSource(parent) {}\n";
     s << "    ~" << cls << "Plugin() override;\n\n";
-    s << "    QString name() const override { return MODULE_NAME; }\n";
-    s << "    QString version() const override { return MODULE_VERSION; }\n\n";
+    s << "    QString name() const override { return QStringLiteral(\"" << module.name << "\"); }\n";
+    s << "    QString version() const override { return QStringLiteral(\"" << module.version << "\"); }\n\n";
     s << "    Q_INVOKABLE void initLogos(LogosAPI* api);\n\n";
     s << "    // Slots from the generated .rep — forwarded to the impl.\n";
     for (const MethodDecl& m : uiViewMethods(module)) {
