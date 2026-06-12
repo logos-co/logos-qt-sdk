@@ -1,20 +1,24 @@
 // UI-backend glue generation: type=ui_qml + interface=universal modules.
-// From a parsed impl header (ModuleDecl), emits:
-//   <name>.rep             — derived QtRO contract (the view API)
-//   <name>_ui_interface.h  — PluginInterface subclass + IID
-//   <name>_ui_glue.{h,cpp} — plugin deriving the repc SimpleSource +
-//                            ViewPluginBase; forwards slots to the impl and
-//                            wires LogosModules/context in initLogos.
+//
+// USER-WRITTEN: the .rep (the view contract) and the *Backend.{h,cpp}
+// deriving <RepClass>SimpleSource + LogosModuleContext.
+// GENERATED: <name>_ui_interface.h (PluginInterface + IID) and
+// <name>_ui_glue.{h,cpp} (the *Plugin: Q_PLUGIN_METADATA + initLogos wiring
+// LogosModules/context into the backend + setBackend).
 #pragma once
 
 #include <QString>
-#include "lidl_ast.h"
 
-bool lidlUiSupported(const ModuleDecl& module, QString* whyNot);
-QString lidlMakeUiRepFile(const ModuleDecl& module);
-QString lidlMakeUiInterfaceHeader(const ModuleDecl& module);
-QString lidlMakeUiGlueHeader(const ModuleDecl& module,
-                             const QString& implClass,
-                             const QString& implHeader);
-QString lidlMakeUiGlueSource(const ModuleDecl& module,
-                             const QString& implClass);
+struct UiGlueSpec {
+    QString moduleName;     // metadata.json name (e.g. ticker_panel)
+    QString moduleVersion;  // metadata.json version
+    QString pluginBase;     // PascalCase of moduleName (class name stem)
+    QString repClass;       // class declared in the user's .rep
+    QString backendClass;   // user's backend class (default <pluginBase>Backend)
+    QString backendHeader;  // include name (default <name>_backend.h)
+};
+
+bool lidlUiParseRepClass(const QString& repPath, QString* repClass, QString* whyNot);
+QString lidlMakeUiInterfaceHeader(const UiGlueSpec& spec);
+QString lidlMakeUiGlueHeader(const UiGlueSpec& spec);
+QString lidlMakeUiGlueSource(const UiGlueSpec& spec);

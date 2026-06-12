@@ -17,8 +17,10 @@
 //                       <name>_cdylib_glue.{h,cpp}
 //                       (the C-ABI impl-exports come from logos-cpp-generator)
 //   --backend ui      UI plugin backend (type=ui_qml + interface=universal):
-//                       <name>.rep, <name>_ui_interface.h,
-//                       <name>_ui_glue.{h,cpp}
+//                       --metadata <m.json> --rep <view.rep>
+//                       [--backend-class C] [--backend-header h]
+//                       emits <name>_ui_interface.h + <name>_ui_glue.{h,cpp}
+//                       around the USER-written .rep + *Backend class
 
 #include <QCoreApplication>
 #include <QDir>
@@ -26,8 +28,12 @@
 #include <QFileInfo>
 #include <QTextStream>
 
+#include <QJsonDocument>
+#include <QJsonObject>
+
 #include "impl_header_parser.h"
 #include "lidl_parser.h"
+#include "lidl_emit_common.h"
 #include "lidl_gen_provider.h"
 #include "lidl_gen_cdylib_glue.h"
 #include "lidl_gen_ui.h"
@@ -74,6 +80,53 @@ int main(int argc, char* argv[])
     const QString backend    = argValue(args, "--backend");
     QString outputDir        = argValue(args, "--output-dir");
     QString implHeader       = argValue(args, "--impl-header");
+
+    // --backend ui: standalone mode — the user writes the .rep and the
+    // Backend class; only the Plugin/Interface pair is generated.
+    if (backend == "ui") {
+        const QString repPath = argValue(args, "--rep");
+        if (metadata.isEmpty() || repPath.isEmpty()) {
+            err << "Usage: logos-qt-generator --backend ui --metadata <metadata.json>\n"
+                   "         --rep <view.rep> [--backend-class <C>]\n"
+                   "         [--backend-header <include-name>] [--output-dir <dir>]\n";
+            return 1;
+        }
+        QFile mf(metadata);
+        if (!mf.open(QIODevice::ReadOnly)) {
+            err << "Failed to read metadata: " << metadata << "\n";
+            return 3;
+        }
+        const QJsonObject meta = QJsonDocument::fromJson(mf.readAll()).object();
+        UiGlueSpec spec;
+        spec.moduleName = meta.value(QStringLiteral("name")).toString();
+        spec.moduleVersion = meta.value(QStringLiteral("version")).toString(QStringLiteral("1.0.0"));
+        if (spec.moduleName.isEmpty()) {
+            err << "metadata.json has no name\n";
+            return 3;
+        }
+        spec.pluginBase = lidlToPascalCase(spec.moduleName);
+        QString repErr;
+        if (!lidlUiParseRepClass(repPath, &spec.repClass, &repErr)) {
+            err << "Error: " << repErr << "\n";
+            return 4;
+        }
+        spec.backendClass = argValue(args, "--backend-class");
+        if (spec.backendClass.isEmpty())
+            spec.backendClass = spec.pluginBase + QStringLiteral("Backend");
+        spec.backendHeader = argValue(args, "--backend-header");
+        if (spec.backendHeader.isEmpty())
+            spec.backendHeader = spec.moduleName + QStringLiteral("_backend.h");
+        if (outputDir.isEmpty())
+            outputDir = QDir::current().filePath("generated");
+        QDir().mkpath(outputDir);
+        QList<Out> outs;
+        outs.append({spec.moduleName + "_ui_interface.h", lidlMakeUiInterfaceHeader(spec)});
+        outs.append({spec.moduleName + "_ui_glue.h", lidlMakeUiGlueHeader(spec)});
+        outs.append({spec.moduleName + "_ui_glue.cpp", lidlMakeUiGlueSource(spec)});
+        const int rc = writeAll(outs, outputDir, out, err);
+        out.flush();
+        return rc;
+    }
 
     const bool fromHeader = !headerPath.isEmpty();
     if ((!fromHeader && lidlPath.isEmpty()) || backend.isEmpty()
@@ -124,18 +177,6 @@ int main(int argc, char* argv[])
     } else if (backend == "cdylib") {
         outs.append({mod.name + "_cdylib_glue.h", lidlMakeCdylibGlueHeader(mod)});
         outs.append({mod.name + "_cdylib_glue.cpp", lidlMakeCdylibGlueSource(mod)});
-    } else if (backend == "ui") {
-        QString uiErr;
-        if (!lidlUiSupported(mod, &uiErr)) {
-            err << "Error: module not ui-backend-eligible: " << uiErr << "\n";
-            return 12;
-        }
-        outs.append({mod.name + ".rep", lidlMakeUiRepFile(mod)});
-        outs.append({mod.name + "_ui_interface.h", lidlMakeUiInterfaceHeader(mod)});
-        outs.append({mod.name + "_ui_glue.h",
-                     lidlMakeUiGlueHeader(mod, implClass, implHeader)});
-        outs.append({mod.name + "_ui_glue.cpp",
-                     lidlMakeUiGlueSource(mod, implClass)});
     } else {
         err << "Unknown --backend: " << backend << " (expected qt|cdylib|ui)\n";
         return 2;

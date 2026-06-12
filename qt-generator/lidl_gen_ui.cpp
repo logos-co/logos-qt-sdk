@@ -1,228 +1,129 @@
 // UI-backend glue generation (see lidl_gen_ui.h).
 //
-// The authoring model mirrors the universal core path: the author writes ONE
-// clean impl class (optionally deriving LogosModuleContext for modules() /
-// onContextReady) whose public methods are the view API. Everything else —
-// the .rep contract, the Qt plugin classes, the LogosModules wiring — is
-// generated. Existing LogosAPI*-based UI plugins are untouched: this path is
-// opt-in via metadata `type: "ui_qml"` + `interface: "universal"`.
+// The authoring split for type=ui_qml + interface=universal:
+//
+//   USER-WRITTEN   the .rep (the view contract — full QtRO power: SLOTs,
+//                  PROPs, SIGNALs) and the *Backend.{h,cpp} class deriving
+//                  the repc <RepClass>SimpleSource + LogosModuleContext
+//                  (which supplies onContextReady() and the modules() typed
+//                  accessors, exactly like a universal core module impl).
+//
+//   GENERATED      the *Interface.h (PluginInterface + IID) and the
+//                  *Plugin.{h,cpp} (Q_PLUGIN_METADATA, name()/version(),
+//                  ViewPluginBase, and the Q_INVOKABLE initLogos that
+//                  constructs LogosModules, wires it + the context into the
+//                  backend — firing onContextReady — and registers the
+//                  backend as the QtRO source).
+//
+// Existing LogosAPI*-based UI plugins (interface: legacy) are untouched.
 
 #include "lidl_gen_ui.h"
-#include "lidl_emit_common.h"
 
+#include <QFile>
+#include <QRegularExpression>
 #include <QTextStream>
 
-namespace {
-
-// QtRO .rep / glue boundary types. UI view APIs are deliberately narrow in
-// v1: scalars + strings (QML-friendly, QDataStream-safe).
-QString uiQtType(const TypeExpr& te)
+bool lidlUiParseRepClass(const QString& repPath, QString* repClass, QString* whyNot)
 {
-    if (te.kind == TypeExpr::Primitive) {
-        if (te.name == "tstr")    return "QString";
-        if (te.name == "int")     return "qlonglong";
-        if (te.name == "uint")    return "qulonglong";
-        if (te.name == "float64") return "double";
-        if (te.name == "bool")    return "bool";
-    }
-    return QString();
-}
-
-bool uiTypeSupported(const TypeExpr& te) { return !uiQtType(te).isEmpty(); }
-
-// Qt slot argument -> impl (std) argument expression.
-QString uiQtArgToStd(const TypeExpr& te, const QString& name)
-{
-    if (te.name == "tstr") return name + ".toStdString()";
-    if (te.name == "int")  return "static_cast<int64_t>(" + name + ")";
-    if (te.name == "uint") return "static_cast<uint64_t>(" + name + ")";
-    return name;
-}
-
-// impl (std) return expression -> Qt slot return expression.
-QString uiStdRetToQt(const TypeExpr& te, const QString& expr)
-{
-    if (te.name == "tstr") return "QString::fromStdString(" + expr + ")";
-    if (te.name == "int")  return "static_cast<qlonglong>(" + expr + ")";
-    if (te.name == "uint") return "static_cast<qulonglong>(" + expr + ")";
-    return expr;
-}
-
-bool uiIsVoid(const TypeExpr& te)
-{
-    return te.kind == TypeExpr::Primitive && te.name == "void";
-}
-
-// LogosModuleContext framework hooks are part of the impl's lifecycle, not
-// its view API — never surface them as .rep slots.
-bool uiIsFrameworkHook(const MethodDecl& m)
-{
-    return m.name == "onContextReady";
-}
-
-QVector<MethodDecl> uiViewMethods(const ModuleDecl& module)
-{
-    QVector<MethodDecl> out;
-    for (const MethodDecl& m : module.methods)
-        if (!uiIsFrameworkHook(m)) out.append(m);
-    return out;
-}
-
-} // namespace
-
-bool lidlUiSupported(const ModuleDecl& module, QString* whyNot)
-{
-    if (!module.events.isEmpty()) {
-        if (whyNot) *whyNot =
-            "logos_events: is not supported for ui backends (v1) — the view "
-            "talks to QML via .rep properties/signals, not module events. "
-            "Subscribe to DEPENDENCY events instead (modules().<dep>.on<Event>).";
+    QFile f(repPath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (whyNot) *whyNot = "cannot read .rep file: " + repPath;
         return false;
     }
-    for (const MethodDecl& m : uiViewMethods(module)) {
-        if (!uiIsVoid(m.returnType) && !uiTypeSupported(m.returnType)) {
-            if (whyNot) *whyNot = "method " + m.name + ": unsupported return type for a ui view API (v1 supports void/int/uint/float64/bool/string)";
-            return false;
-        }
-        for (const ParamDecl& p : m.params) {
-            if (!uiTypeSupported(p.type)) {
-                if (whyNot) *whyNot = "method " + m.name + ", param " + p.name + ": unsupported type for a ui view API (v1 supports int/uint/float64/bool/string)";
-                return false;
-            }
-        }
+    const QString text = QString::fromUtf8(f.readAll());
+    // Same extraction logos_module(REP_FILE ...) performs: the first class
+    // declaration names the QtRO types (SimpleSource/Replica/ViewPluginBase).
+    QRegularExpressionMatch m =
+        QRegularExpression(QStringLiteral("class[ \\t]+([A-Za-z_][A-Za-z0-9_]*)")).match(text);
+    if (!m.hasMatch()) {
+        if (whyNot) *whyNot = "no `class <Name>` declaration found in " + repPath;
+        return false;
     }
+    if (repClass) *repClass = m.captured(1);
     return true;
 }
 
-QString lidlMakeUiRepFile(const ModuleDecl& module)
+QString lidlMakeUiInterfaceHeader(const UiGlueSpec& spec)
 {
-    const QString cls = lidlToPascalCase(module.name);
-    QString r;
-    QTextStream s(&r);
-    s << "// AUTO-GENERATED by logos-cpp-generator --backend ui from the impl\n";
-    s << "// header -- do not edit. One SLOT per public impl method; QtRO's repc\n";
-    s << "// turns this into " << cls << "SimpleSource (backend) + " << cls << "Replica (QML).\n";
-    s << "class " << cls << "\n{\n";
-    for (const MethodDecl& m : uiViewMethods(module)) {
-        QStringList params;
-        for (const ParamDecl& p : m.params)
-            params << uiQtType(p.type) + " " + p.name;
-        const QString ret = uiIsVoid(m.returnType) ? "void" : uiQtType(m.returnType);
-        s << "    SLOT(" << ret << " " << m.name << "(" << params.join(", ") << "))\n";
-    }
-    s << "}\n";
-    return r;
-}
-
-QString lidlMakeUiInterfaceHeader(const ModuleDecl& module)
-{
-    const QString cls = lidlToPascalCase(module.name);
     QString h;
     QTextStream s(&h);
-    s << "// AUTO-GENERATED by logos-cpp-generator --backend ui -- do not edit\n";
+    s << "// AUTO-GENERATED by logos-qt-generator --backend ui -- do not edit\n";
     s << "#pragma once\n\n";
     s << "#include \"interface.h\"\n\n";
-    s << "class " << cls << "Interface : public PluginInterface\n{\npublic:\n";
-    s << "    virtual ~" << cls << "Interface() = default;\n};\n\n";
-    s << "#define " << cls << "Interface_iid \"org.logos." << cls << "Interface\"\n";
-    s << "Q_DECLARE_INTERFACE(" << cls << "Interface, " << cls << "Interface_iid)\n";
+    s << "class " << spec.pluginBase << "Interface : public PluginInterface\n{\npublic:\n";
+    s << "    virtual ~" << spec.pluginBase << "Interface() = default;\n};\n\n";
+    s << "#define " << spec.pluginBase << "Interface_iid \"org.logos." << spec.pluginBase << "Interface\"\n";
+    s << "Q_DECLARE_INTERFACE(" << spec.pluginBase << "Interface, " << spec.pluginBase << "Interface_iid)\n";
     return h;
 }
 
-QString lidlMakeUiGlueHeader(const ModuleDecl& module,
-                             const QString& implClass,
-                             const QString& implHeader)
+QString lidlMakeUiGlueHeader(const UiGlueSpec& spec)
 {
-    const QString cls = lidlToPascalCase(module.name);
     QString h;
     QTextStream s(&h);
-    s << "// AUTO-GENERATED by logos-cpp-generator --backend ui -- do not edit\n";
+    s << "// AUTO-GENERATED by logos-qt-generator --backend ui -- do not edit\n";
     s << "#pragma once\n\n";
     s << "#include <QObject>\n#include <QString>\n#include <memory>\n\n";
-    s << "#include \"" << implHeader << "\"\n";
-    s << "#include \"" << module.name << "_ui_interface.h\"\n";
-    s << "#include \"LogosViewPluginBase.h\"\n";
-    s << "#include \"rep_" << module.name << "_source.h\"\n\n";
+    s << "#include \"" << spec.backendHeader << "\"\n";
+    s << "#include \"" << spec.moduleName << "_ui_interface.h\"\n";
+    s << "#include \"LogosViewPluginBase.h\"\n\n";
     s << "class LogosAPI;\nstruct LogosModules;\n\n";
-    s << "// Generated UI plugin: derives the repc source (typed remoting to the\n";
-    s << "// QML replica), forwards every slot to the author's impl, and wires the\n";
-    s << "// LogosModules typed-deps aggregate + context into the impl on initLogos\n";
-    s << "// (so onContextReady can subscribe to dependency events at load).\n";
-    s << "class " << cls << "Plugin : public " << cls << "SimpleSource,\n";
-    s << QString(" ").repeated(22 + cls.size()) << "public " << cls << "Interface,\n";
-    s << QString(" ").repeated(22 + cls.size()) << "public " << cls << "ViewPluginBase\n{\n";
+    s << "// Generated UI plugin around the user-written " << spec.backendClass << ".\n";
+    s << "// Owns the backend, wires the LogosModules typed-deps aggregate + the\n";
+    s << "// module context into it on initLogos (firing onContextReady — so\n";
+    s << "// dependency subscriptions are live before the view's first call), and\n";
+    s << "// registers it as the QtRO source for the QML replica.\n";
+    s << "class " << spec.pluginBase << "Plugin : public QObject,\n";
+    s << QString(" ").repeated(22 + spec.pluginBase.size()) << "public " << spec.pluginBase << "Interface,\n";
+    s << QString(" ").repeated(22 + spec.pluginBase.size()) << "public " << spec.repClass << "ViewPluginBase\n{\n";
     s << "    Q_OBJECT\n";
-    s << "    Q_PLUGIN_METADATA(IID " << cls << "Interface_iid FILE \"metadata.json\")\n";
-    s << "    Q_INTERFACES(" << cls << "Interface LogosViewPlugin)\n\npublic:\n";
-    s << "    // Ctor/dtor are out-of-line: the header is compiled by moc TUs\n";
-    s << "    // where LogosModules is incomplete, and an inline ctor would\n";
-    s << "    // instantiate ~unique_ptr<LogosModules> for exception cleanup.\n";
-    s << "    explicit " << cls << "Plugin(QObject* parent = nullptr);\n";
-    s << "    ~" << cls << "Plugin() override;\n\n";
-    s << "    QString name() const override { return QStringLiteral(\"" << module.name << "\"); }\n";
-    s << "    QString version() const override { return QStringLiteral(\"" << module.version << "\"); }\n\n";
+    s << "    Q_PLUGIN_METADATA(IID " << spec.pluginBase << "Interface_iid FILE \"metadata.json\")\n";
+    s << "    Q_INTERFACES(" << spec.pluginBase << "Interface LogosViewPlugin)\n\npublic:\n";
+    s << "    // Ctor/dtor are out-of-line: this header is compiled by moc TUs\n";
+    s << "    // where LogosModules may be incomplete.\n";
+    s << "    explicit " << spec.pluginBase << "Plugin(QObject* parent = nullptr);\n";
+    s << "    ~" << spec.pluginBase << "Plugin() override;\n\n";
+    s << "    QString name() const override { return QStringLiteral(\"" << spec.moduleName << "\"); }\n";
+    s << "    QString version() const override { return QStringLiteral(\"" << spec.moduleVersion << "\"); }\n\n";
     s << "    Q_INVOKABLE void initLogos(LogosAPI* api);\n\n";
-    s << "    // Slots from the generated .rep — forwarded to the impl.\n";
-    for (const MethodDecl& m : uiViewMethods(module)) {
-        QStringList params;
-        for (const ParamDecl& p : m.params)
-            params << uiQtType(p.type) + " " + p.name;
-        const QString ret = uiIsVoid(m.returnType) ? "void" : uiQtType(m.returnType);
-        s << "    " << ret << " " << m.name << "(" << params.join(", ") << ") override;\n";
-    }
-    s << "\nprivate:\n";
-    s << "    " << implClass << " m_impl;\n";
+    s << "private:\n";
+    s << "    std::unique_ptr<" << spec.backendClass << "> m_backend;\n";
     s << "    std::unique_ptr<LogosModules> m_logosModules;\n";
     s << "};\n";
     return h;
 }
 
-QString lidlMakeUiGlueSource(const ModuleDecl& module, const QString& implClass)
+QString lidlMakeUiGlueSource(const UiGlueSpec& spec)
 {
-    Q_UNUSED(implClass);
-    const QString cls = lidlToPascalCase(module.name);
     QString c;
     QTextStream s(&c);
-    s << "// AUTO-GENERATED by logos-cpp-generator --backend ui -- do not edit\n";
-    s << "#include \"" << module.name << "_ui_glue.h\"\n\n";
+    s << "// AUTO-GENERATED by logos-qt-generator --backend ui -- do not edit\n";
+    s << "#include \"" << spec.moduleName << "_ui_glue.h\"\n\n";
     s << "#include \"logos_api.h\"\n";
     s << "#include \"logos_module_context.h\"\n";
     s << "#include \"logos_sdk.h\"\n\n";
-    s << cls << "Plugin::" << cls << "Plugin(QObject* parent) : " << cls << "SimpleSource(parent) {}\n";
-    s << cls << "Plugin::~" << cls << "Plugin() = default;\n\n";
-    s << "void " << cls << "Plugin::initLogos(LogosAPI* api)\n{\n";
+    s << spec.pluginBase << "Plugin::" << spec.pluginBase << "Plugin(QObject* parent)\n";
+    s << "    : QObject(parent)\n";
+    s << "    , m_backend(std::make_unique<" << spec.backendClass << ">())\n";
+    s << "{\n}\n\n";
+    s << spec.pluginBase << "Plugin::~" << spec.pluginBase << "Plugin() = default;\n\n";
+    s << "void " << spec.pluginBase << "Plugin::initLogos(LogosAPI* api)\n{\n";
     s << "    if (m_logosModules || !api) return;\n";
     s << "    // Same wiring order as the universal core glue: typed-deps aggregate\n";
     s << "    // first, context LAST (maybeSetContext fires onContextReady — by then\n";
-    s << "    // modules() is live, so the hook can make typed calls and subscribe\n";
-    s << "    // to dependency events). The SFINAE helpers no-op for impls that\n";
-    s << "    // don't derive LogosModuleContext.\n";
+    s << "    // modules() is live, so the backend can make typed calls and\n";
+    s << "    // subscribe to dependency events from the hook). The SFINAE helpers\n";
+    s << "    // no-op if the backend doesn't derive LogosModuleContext.\n";
     s << "    m_logosModules = std::make_unique<LogosModules>(api);\n";
-    s << "    _logos_codegen_::maybeSetLogosModules(m_impl, m_logosModules.get());\n";
+    s << "    _logos_codegen_::maybeSetLogosModules(*m_backend, m_logosModules.get());\n";
     s << "    QObject* obj = api;\n";
-    s << "    _logos_codegen_::maybeSetContext(m_impl,\n";
+    s << "    _logos_codegen_::maybeSetContext(*m_backend,\n";
     s << "        obj->property(\"modulePath\").toString().toStdString(),\n";
     s << "        obj->property(\"instanceId\").toString().toStdString(),\n";
     s << "        obj->property(\"instancePersistencePath\").toString().toStdString());\n";
-    s << "    // Register as the QtRO source so ui-host can enableRemoting the\n";
-    s << "    // typed " << cls << "SourceAPI for the QML replica.\n";
-    s << "    setBackend(this);\n";
+    s << "    // Register the backend (a " << spec.repClass << "SimpleSource) as the QtRO\n";
+    s << "    // source so ui-host can enableRemoting the typed " << spec.repClass << "SourceAPI.\n";
+    s << "    setBackend(m_backend.get());\n";
     s << "}\n";
-    for (const MethodDecl& m : uiViewMethods(module)) {
-        QStringList params, args;
-        for (const ParamDecl& p : m.params) {
-            params << uiQtType(p.type) + " " + p.name;
-            args << uiQtArgToStd(p.type, p.name);
-        }
-        const bool isVoid = uiIsVoid(m.returnType);
-        const QString ret = isVoid ? "void" : uiQtType(m.returnType);
-        s << "\n" << ret << " " << cls << "Plugin::" << m.name << "(" << params.join(", ") << ")\n{\n";
-        const QString call = "m_impl." + m.name + "(" + args.join(", ") + ")";
-        if (isVoid)
-            s << "    " << call << ";\n";
-        else
-            s << "    return " << uiStdRetToQt(m.returnType, call) << ";\n";
-        s << "}\n";
-    }
     return c;
 }
