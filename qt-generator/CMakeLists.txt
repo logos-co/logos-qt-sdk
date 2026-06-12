@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 3.14)
+project(LogosQtGenerator)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core)
+
+# The shared LIDL frontend, distributed by logos-cpp-sdk under
+# share/lidl-frontend/ — both generators compile the same sources so the
+# parsed surface can never skew between them.
+if(NOT DEFINED LIDL_FRONTEND_DIR)
+    if(DEFINED ENV{LIDL_FRONTEND_DIR})
+        set(LIDL_FRONTEND_DIR $ENV{LIDL_FRONTEND_DIR})
+    else()
+        message(FATAL_ERROR "LIDL_FRONTEND_DIR is not set (point it at logos-cpp-sdk's share/lidl-frontend)")
+    endif()
+endif()
+
+add_executable(logos-qt-generator
+    main.cpp
+    lidl_gen_provider.cpp
+    lidl_gen_cdylib_glue.cpp
+    lidl_gen_ui.cpp
+    ${LIDL_FRONTEND_DIR}/lidl_lexer.cpp
+    ${LIDL_FRONTEND_DIR}/lidl_parser.cpp
+    ${LIDL_FRONTEND_DIR}/lidl_serializer.cpp
+    ${LIDL_FRONTEND_DIR}/lidl_validator.cpp
+    ${LIDL_FRONTEND_DIR}/impl_header_parser.cpp
+    ${LIDL_FRONTEND_DIR}/lidl_emit_common.cpp
+)
+
+target_include_directories(logos-qt-generator PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${LIDL_FRONTEND_DIR}
+)
+
+target_link_libraries(logos-qt-generator PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+
+install(TARGETS logos-qt-generator RUNTIME DESTINATION bin)
