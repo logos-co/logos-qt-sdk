@@ -1,0 +1,47 @@
+name: CI
+
+# pull_request is unfiltered: stacked PRs (based on other feature branches)
+# must run CI too.
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - uses: cachix/cachix-action@v15
+        # The cache is an optimization: don't let a failed push in the
+        # action's post step fail a job whose tests all passed.
+        continue-on-error: true
+        with:
+          name: logos-co
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      - name: Build tests
+        run: nix build '.#tests'
+
+      - name: Run qt-sdk tests
+        run: ./result/bin/qt_sdk_tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Build logos-qt-generator
+        run: nix build '.#logos-qt-generator' -o result-qtgen
+
+      - name: Smoke the generator
+        run: ./result-qtgen/bin/logos-qt-generator 2>&1 | grep -q Usage
