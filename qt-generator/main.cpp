@@ -7,7 +7,9 @@
 // LIDL derivation). Both tools share one LIDL frontend: the sources under
 // logos-cpp-sdk's share/lidl-frontend/, compiled into this binary.
 //
-// Modes (all --from-header <impl.h> --impl-class <C> --metadata <m.json>):
+// Input is either --from-header <impl.h> --impl-class <C> --metadata <m.json>
+// (the contract derived from the C++ class) or --lidl <contract.lidl> (the
+// committed contract — e.g. Rust cdylib modules). Modes:
 //   --backend qt      universal C++ module glue:
 //                       <name>_qt_glue.h, <name>_dispatch.cpp,
 //                       <name>_events.cpp (when logos_events: present)
@@ -25,6 +27,7 @@
 #include <QTextStream>
 
 #include "impl_header_parser.h"
+#include "lidl_parser.h"
 #include "lidl_gen_provider.h"
 #include "lidl_gen_cdylib_glue.h"
 #include "lidl_gen_ui.h"
@@ -65,31 +68,50 @@ int main(int argc, char* argv[])
     const QStringList args = app.arguments();
 
     const QString headerPath = argValue(args, "--from-header");
+    const QString lidlPath   = argValue(args, "--lidl");
     const QString implClass  = argValue(args, "--impl-class");
     const QString metadata   = argValue(args, "--metadata");
     const QString backend    = argValue(args, "--backend");
     QString outputDir        = argValue(args, "--output-dir");
     QString implHeader       = argValue(args, "--impl-header");
 
-    if (headerPath.isEmpty() || implClass.isEmpty() || metadata.isEmpty()
-        || backend.isEmpty()) {
-        err << "Usage: logos-qt-generator --from-header <impl.h> --impl-class <C>\n"
-               "         --metadata <metadata.json> --backend <qt|cdylib|ui>\n"
+    const bool fromHeader = !headerPath.isEmpty();
+    if ((!fromHeader && lidlPath.isEmpty()) || backend.isEmpty()
+        || (fromHeader && (implClass.isEmpty() || metadata.isEmpty()))) {
+        err << "Usage: logos-qt-generator (--from-header <impl.h> --impl-class <C>\n"
+               "         --metadata <metadata.json> | --lidl <contract.lidl>)\n"
+               "         --backend <qt|cdylib|ui>\n"
                "         [--impl-header <include-name>] [--output-dir <dir>]\n";
         return 1;
     }
-    if (implHeader.isEmpty())
+    if (implHeader.isEmpty() && fromHeader)
         implHeader = QFileInfo(headerPath).fileName();
     if (outputDir.isEmpty())
         outputDir = QDir::current().filePath("generated");
     QDir().mkpath(outputDir);
 
-    ImplParseResult pr = parseImplHeader(headerPath, implClass, metadata, err);
-    if (pr.hasError()) {
-        err << "Error parsing impl header: " << pr.error << "\n";
-        return 4;
+    ModuleDecl mod;
+    if (fromHeader) {
+        ImplParseResult pr = parseImplHeader(headerPath, implClass, metadata, err);
+        if (pr.hasError()) {
+            err << "Error parsing impl header: " << pr.error << "\n";
+            return 4;
+        }
+        mod = pr.module;
+    } else {
+        QFile f(lidlPath);
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            err << "Failed to open LIDL file: " << lidlPath << "\n";
+            return 3;
+        }
+        LidlParseResult pr = lidlParse(QString::fromUtf8(f.readAll()));
+        if (pr.hasError()) {
+            err << lidlPath << ":" << pr.errorLine << ":" << pr.errorColumn
+                << ": " << pr.error << "\n";
+            return 4;
+        }
+        mod = pr.module;
     }
-    const ModuleDecl& mod = pr.module;
 
     QList<Out> outs;
     if (backend == "qt") {
