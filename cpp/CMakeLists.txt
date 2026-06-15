@@ -100,6 +100,7 @@ install(FILES
     logos_api_provider.h
     logos_provider_object.h
     qt_provider_object.h
+    logos_ui_plugin_context.h
     DESTINATION include
 )
 
