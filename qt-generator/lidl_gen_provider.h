@@ -1,7 +1,7 @@
 #ifndef LIDL_GEN_PROVIDER_H
 #define LIDL_GEN_PROVIDER_H
 
-#include "lidl_ast.h"
+#include "lidl_compat.h"
 #include <QString>
 #include <QTextStream>
 

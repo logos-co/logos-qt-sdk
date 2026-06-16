@@ -5,7 +5,7 @@
 #pragma once
 
 #include <QString>
-#include "lidl_ast.h"
+#include "lidl_compat.h"
 
 QString lidlMakeCdylibGlueHeader(const ModuleDecl& module);
 QString lidlMakeCdylibGlueSource(const ModuleDecl& module);

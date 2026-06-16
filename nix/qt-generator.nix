@@ -1,8 +1,9 @@
 # Builds the logos-qt-generator binary — ALL Qt glue emission (universal
-# qt glue, the cdylib glue half, ui backend glue). Compiles the shared LIDL
-# frontend distributed by logos-cpp-sdk (share/lidl-frontend) so both
-# generators parse one surface.
-{ pkgs, src, cppGeneratorBin }:
+# qt glue, the cdylib glue half, ui backend glue). Links logos-lidl for the
+# canonical frontend and compiles the shared C++/Qt backend helpers
+# distributed by logos-cpp-sdk (share/lidl-frontend) so both generators parse
+# one surface.
+{ pkgs, src, cppGeneratorBin, logos-lidl }:
 
 pkgs.stdenv.mkDerivation {
   pname = "logos-qt-generator";
@@ -17,7 +18,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.ninja
     pkgs.qt6.wrapQtAppsNoGuiHook
   ];
-  buildInputs = [ pkgs.qt6.qtbase ];
+  buildInputs = [ pkgs.qt6.qtbase logos-lidl ];
 
   cmakeFlags = [
     "-GNinja"
