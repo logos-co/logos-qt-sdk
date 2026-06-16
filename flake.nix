@@ -9,10 +9,8 @@
       inputs.logos-nix.follows = "logos-nix";
     };
     # The canonical, language-neutral LIDL frontend the qt-generator links.
-    # Temporary branch pin (descriptions + C ABI) — re-point at master once
-    # logos-lidl lands.
     logos-lidl = {
-      url = "github:logos-co/logos-lidl/636b06b9f24a993b7f8dc3d31672a9c9634801f7";
+      url = "github:logos-co/logos-lidl";
       inputs.logos-nix.follows = "logos-nix";
     };
     # Test-only: logos-cpp-generator is used to generate the provider
