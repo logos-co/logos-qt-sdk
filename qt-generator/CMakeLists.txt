@@ -7,9 +7,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core)
 
-# The shared LIDL frontend, distributed by logos-cpp-sdk under
-# share/lidl-frontend/ — both generators compile the same sources so the
-# parsed surface can never skew between them.
+# logos-lidl: the canonical, language-neutral LIDL frontend (lexer/parser/AST/
+# serializer/validator). Both generators link it, so the parsed surface can
+# never skew between them.
+find_package(logos-lidl REQUIRED)
+
+# The shared C++/Qt codegen BACKEND helpers (Qt type-name mapping + the C++
+# impl-header source parser + the compat shim onto logos-lidl's AST), still
+# distributed by logos-cpp-sdk under share/lidl-frontend/. Only these — not the
+# frontend — are source-shared; the frontend itself comes from logos-lidl above.
 if(NOT DEFINED LIDL_FRONTEND_DIR)
     if(DEFINED ENV{LIDL_FRONTEND_DIR})
         set(LIDL_FRONTEND_DIR $ENV{LIDL_FRONTEND_DIR})
@@ -23,10 +29,6 @@ add_executable(logos-qt-generator
     lidl_gen_provider.cpp
     lidl_gen_cdylib_glue.cpp
     lidl_gen_ui.cpp
-    ${LIDL_FRONTEND_DIR}/lidl_lexer.cpp
-    ${LIDL_FRONTEND_DIR}/lidl_parser.cpp
-    ${LIDL_FRONTEND_DIR}/lidl_serializer.cpp
-    ${LIDL_FRONTEND_DIR}/lidl_validator.cpp
     ${LIDL_FRONTEND_DIR}/impl_header_parser.cpp
     ${LIDL_FRONTEND_DIR}/lidl_emit_common.cpp
 )
@@ -36,6 +38,6 @@ target_include_directories(logos-qt-generator PRIVATE
     ${LIDL_FRONTEND_DIR}
 )
 
-target_link_libraries(logos-qt-generator PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+target_link_libraries(logos-qt-generator PRIVATE Qt${QT_VERSION_MAJOR}::Core logos-lidl::logos_lidl)
 
 install(TARGETS logos-qt-generator RUNTIME DESTINATION bin)

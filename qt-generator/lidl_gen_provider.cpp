@@ -1,8 +1,5 @@
 #include "lidl_gen_provider.h"
 #include "lidl_emit_common.h"
-#include "lidl_parser.h"
-#include "lidl_serializer.h"
-#include "lidl_validator.h"
 
 #include <QFile>
 #include <QDir>
@@ -38,7 +35,7 @@ static QString qtParamToStd(const TypeExpr& te, const QString& paramName)
         const TypeExpr& elem = te.elements[0];
         if (elem.kind == TypeExpr::Primitive && elem.name == "tstr")
             return "lidlToStdStringVector(" + paramName + ")";
-        return "lidlToStdVector_" + elem.name + "(" + paramName + ")";
+        return "lidlToStdVector_" + qs(elem.name) + "(" + paramName + ")";
     }
     return paramName;
 }
@@ -59,7 +56,7 @@ static QString stdReturnToQt(const TypeExpr& te, const QString& varName)
         const TypeExpr& elem = te.elements[0];
         if (elem.kind == TypeExpr::Primitive && elem.name == "tstr")
             return "lidlToQStringList(" + varName + ")";
-        return "lidlToQVariantList_" + elem.name + "(" + varName + ")";
+        return "lidlToQVariantList_" + qs(elem.name) + "(" + varName + ")";
     }
     return varName;
 }
@@ -88,7 +85,7 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
                                const QString& implClass,
                                const QString& implHeader)
 {
-    QString className = lidlToPascalCase(module.name);
+    QString className = lidlToPascalCase(qs(module.name));
     QString providerObjectClass = className + "ProviderObject";
     QString pluginClass = className + "Plugin";
     QString h;
@@ -220,7 +217,7 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
     // --- ProviderObject class ---
     s << "class " << providerObjectClass << " : public LogosProviderBase {\n";
     s << "    LOGOS_PROVIDER(" << providerObjectClass << ", \""
-      << module.name << "\", \"" << (module.version.isEmpty() ? "0.0.0" : module.version) << "\")\n\n";
+      << module.name << "\", \"" << (module.version.empty() ? "0.0.0" : module.version) << "\")\n\n";
     s << "public:\n";
 
     for (const MethodDecl& md : module.methods) {
@@ -242,7 +239,7 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
         if (qtRet == "void") {
             s << "        m_impl." << md.name << "(";
             for (int i = 0; i < md.params.size(); ++i) {
-                s << qtParamToStd(md.params[i].type, md.params[i].name);
+                s << qtParamToStd(md.params[i].type, qs(md.params[i].name));
                 if (i + 1 < md.params.size()) s << ", ";
             }
             s << ");\n";
@@ -250,7 +247,7 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
             // LogosMap / LogosList: impl returns nlohmann::json, convert to Qt type
             s << "        auto _result = m_impl." << md.name << "(";
             for (int i = 0; i < md.params.size(); ++i) {
-                s << qtParamToStd(md.params[i].type, md.params[i].name);
+                s << qtParamToStd(md.params[i].type, qs(md.params[i].name));
                 if (i + 1 < md.params.size()) s << ", ";
             }
             s << ");\n";
@@ -262,7 +259,7 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
             // StdLogosResult: impl returns pure-C++ result, convert to Qt LogosResult
             s << "        auto _result = m_impl." << md.name << "(";
             for (int i = 0; i < md.params.size(); ++i) {
-                s << qtParamToStd(md.params[i].type, md.params[i].name);
+                s << qtParamToStd(md.params[i].type, qs(md.params[i].name));
                 if (i + 1 < md.params.size()) s << ", ";
             }
             s << ");\n";
@@ -270,7 +267,7 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
         } else if (retConvertible) {
             s << "        auto _result = m_impl." << md.name << "(";
             for (int i = 0; i < md.params.size(); ++i) {
-                s << qtParamToStd(md.params[i].type, md.params[i].name);
+                s << qtParamToStd(md.params[i].type, qs(md.params[i].name));
                 if (i + 1 < md.params.size()) s << ", ";
             }
             s << ");\n";
@@ -278,7 +275,7 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
         } else {
             s << "        return m_impl." << md.name << "(";
             for (int i = 0; i < md.params.size(); ++i) {
-                s << qtParamToStd(md.params[i].type, md.params[i].name);
+                s << qtParamToStd(md.params[i].type, qs(md.params[i].name));
                 if (i + 1 < md.params.size()) s << ", ";
             }
             s << ");\n";
@@ -334,10 +331,10 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
     s << "            api->property(\"instancePersistencePath\").toString().toStdString());\n";
     s << "    }\n\n";
 
-    if (!module.events.isEmpty()) {
+    if (!module.events.empty()) {
         s << "protected:\n";
         for (const EventDecl& ed : module.events) {
-            QString methodName = "emit" + lidlToPascalCase(ed.name);
+            QString methodName = "emit" + lidlToPascalCase(qs(ed.name));
             s << "    void " << methodName << "(";
             for (int i = 0; i < ed.params.size(); ++i) {
                 QString qt = lidlTypeToQt(ed.params[i].type);
@@ -378,7 +375,7 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
     s << "public:\n";
     s << "    QString name() const override { return QStringLiteral(\"" << module.name << "\"); }\n";
     s << "    QString version() const override { return QStringLiteral(\""
-      << (module.version.isEmpty() ? "0.0.0" : module.version) << "\"); }\n";
+      << (module.version.empty() ? "0.0.0" : module.version) << "\"); }\n";
     s << "    LogosProviderObject* createProviderObject() override {\n";
     s << "        return new " << providerObjectClass << "();\n";
     s << "    }\n";
@@ -393,7 +390,7 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
 
 QString lidlMakeProviderDispatch(const ModuleDecl& module)
 {
-    QString className = lidlToPascalCase(module.name);
+    QString className = lidlToPascalCase(qs(module.name));
     QString providerObjectClass = className + "ProviderObject";
     QString c;
     QTextStream s(&c);
@@ -461,15 +458,15 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
         s << "        obj[\"name\"] = QStringLiteral(\"" << md.name << "\");\n";
         s << "        obj[\"returnType\"] = QStringLiteral(\"" << qtRet << "\");\n";
         s << "        obj[\"isInvokable\"] = true;\n";
-        if (!md.description.isEmpty()) {
-            QString escDesc = md.description;
+        if (!md.description.empty()) {
+            QString escDesc = qs(md.description);
             escDesc.replace('\\', "\\\\");
             escDesc.replace('"', "\\\"");
             escDesc.replace('\n', "\\n");
             s << "        obj[\"description\"] = QStringLiteral(\"" << escDesc << "\");\n";
         }
 
-        QString sig = md.name + "(";
+        QString sig = qs(md.name) + "(";
         for (int i = 0; i < md.params.size(); ++i) {
             sig += lidlTypeToQt(md.params[i].type);
             if (i + 1 < md.params.size()) sig += ",";
@@ -477,7 +474,7 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
         sig += ")";
         s << "        obj[\"signature\"] = QStringLiteral(\"" << sig << "\");\n";
 
-        if (!md.params.isEmpty()) {
+        if (!md.params.empty()) {
             s << "        QJsonArray params;\n";
             for (int i = 0; i < md.params.size(); ++i) {
                 s << "        params.append(QJsonObject{{\"type\", QStringLiteral(\""
@@ -502,15 +499,15 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
         s << "        QJsonObject obj;\n";
         s << "        obj[\"type\"] = QStringLiteral(\"event\");\n";
         s << "        obj[\"name\"] = QStringLiteral(\"" << ed.name << "\");\n";
-        if (!ed.description.isEmpty()) {
-            QString escDesc = ed.description;
+        if (!ed.description.empty()) {
+            QString escDesc = qs(ed.description);
             escDesc.replace('\\', "\\\\");
             escDesc.replace('"', "\\\"");
             escDesc.replace('\n', "\\n");
             s << "        obj[\"description\"] = QStringLiteral(\"" << escDesc << "\");\n";
         }
 
-        QString sig = ed.name + "(";
+        QString sig = qs(ed.name) + "(";
         for (int i = 0; i < ed.params.size(); ++i) {
             sig += lidlTypeToQt(ed.params[i].type);
             if (i + 1 < ed.params.size()) sig += ",";
@@ -518,7 +515,7 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
         sig += ")";
         s << "        obj[\"signature\"] = QStringLiteral(\"" << sig << "\");\n";
 
-        if (!ed.params.isEmpty()) {
+        if (!ed.params.empty()) {
             s << "        QJsonArray params;\n";
             for (int i = 0; i < ed.params.size(); ++i) {
                 s << "        params.append(QJsonObject{{\"type\", QStringLiteral(\""
@@ -621,7 +618,7 @@ QString lidlMakeEventsSource(const ModuleDecl& module,
         s << ") {\n";
         s << "    QVariantList _args{";
         for (int i = 0; i < ed.params.size(); ++i) {
-            s << stdParamToQVariantExpr(ed.params[i].type, ed.params[i].name);
+            s << stdParamToQVariantExpr(ed.params[i].type, qs(ed.params[i].name));
             if (i + 1 < ed.params.size()) s << ", ";
         }
         s << "};\n";
@@ -664,7 +661,7 @@ int lidlGenerateProviderGlue(const QString& lidlPath,
 
     LidlValidationResult vr = lidlValidate(pr.module);
     if (vr.hasErrors()) {
-        for (const QString& e : vr.errors)
+        for (const std::string& e : vr.errors)
             err << lidlPath << ": " << e << "\n";
         return 5;
     }
@@ -675,7 +672,7 @@ int lidlGenerateProviderGlue(const QString& lidlPath,
         : outputDir;
     QDir().mkpath(genDirPath);
 
-    QString glueHeaderAbs = QDir(genDirPath).filePath(mod.name + "_qt_glue.h");
+    QString glueHeaderAbs = QDir(genDirPath).filePath(qs(mod.name) + "_qt_glue.h");
     {
         QFile f(glueHeaderAbs);
         if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
@@ -685,7 +682,7 @@ int lidlGenerateProviderGlue(const QString& lidlPath,
         f.write(lidlMakeProviderHeader(mod, implClass, implHeader).toUtf8());
     }
 
-    QString dispatchAbs = QDir(genDirPath).filePath(mod.name + "_dispatch.cpp");
+    QString dispatchAbs = QDir(genDirPath).filePath(qs(mod.name) + "_dispatch.cpp");
     {
         QFile f(dispatchAbs);
         if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
@@ -702,8 +699,8 @@ int lidlGenerateProviderGlue(const QString& lidlPath,
     // any events. The sidecar gets shipped in the dep's headers-* output
     // by buildPlugin.nix's installPhase so consumer-side codegen can
     // discover events without reintrospecting the .dylib.
-    if (!mod.events.isEmpty()) {
-        QString eventsAbs = QDir(genDirPath).filePath(mod.name + "_events.cpp");
+    if (!mod.events.empty()) {
+        QString eventsAbs = QDir(genDirPath).filePath(qs(mod.name) + "_events.cpp");
         {
             QFile f(eventsAbs);
             if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
@@ -714,7 +711,7 @@ int lidlGenerateProviderGlue(const QString& lidlPath,
         }
         out << "Generated: " << eventsAbs << "\n";
 
-        QString lidlAbs = QDir(genDirPath).filePath(mod.name + ".lidl");
+        QString lidlAbs = QDir(genDirPath).filePath(qs(mod.name) + ".lidl");
         {
             QFile f(lidlAbs);
             if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {

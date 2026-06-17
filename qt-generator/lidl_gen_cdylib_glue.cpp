@@ -1,11 +1,12 @@
 #include "lidl_gen_cdylib_glue.h"
 #include "lidl_emit_common.h"
 
+#include <QStringList>
 #include <QTextStream>
 
 QString lidlMakeCdylibGlueHeader(const ModuleDecl& module)
 {
-    const QString className = lidlToPascalCase(module.name);
+    const QString className = lidlToPascalCase(qs(module.name));
     QString c;
     QTextStream s(&c);
 
@@ -42,7 +43,7 @@ QString lidlMakeCdylibGlueHeader(const ModuleDecl& module)
     s << "    bool informModuleToken(const QString& moduleName, const QString& token) override;\n";
     s << "    void setEventListener(EventCallback callback) override;\n";
     s << "    QString providerName() const override { return QStringLiteral(\"" << module.name << "\"); }\n";
-    s << "    QString providerVersion() const override { return QStringLiteral(\"" << (module.version.isEmpty() ? QStringLiteral("1.0.0") : module.version) << "\"); }\n";
+    s << "    QString providerVersion() const override { return QStringLiteral(\"" << (module.version.empty() ? QStringLiteral("1.0.0") : qs(module.version)) << "\"); }\n";
     s << "protected:\n";
     s << "    void onInit(LogosAPI* api) override;\n";
     s << "private:\n";
@@ -58,7 +59,7 @@ QString lidlMakeCdylibGlueHeader(const ModuleDecl& module)
     s << "    Q_INTERFACES(PluginInterface LogosProviderPlugin)\n";
     s << "public:\n";
     s << "    QString name() const override { return QStringLiteral(\"" << module.name << "\"); }\n";
-    s << "    QString version() const override { return QStringLiteral(\"" << (module.version.isEmpty() ? QStringLiteral("1.0.0") : module.version) << "\"); }\n";
+    s << "    QString version() const override { return QStringLiteral(\"" << (module.version.empty() ? QStringLiteral("1.0.0") : qs(module.version)) << "\"); }\n";
     s << "    LogosProviderObject* createProviderObject() override {\n";
     s << "        return new " << className << "CdylibProvider();\n";
     s << "    }\n";
@@ -68,14 +69,14 @@ QString lidlMakeCdylibGlueHeader(const ModuleDecl& module)
 
 QString lidlMakeCdylibGlueSource(const ModuleDecl& module)
 {
-    const QString className = lidlToPascalCase(module.name);
+    const QString className = lidlToPascalCase(qs(module.name));
     const QString provider = className + "CdylibProvider";
 
     // Which methods return StdLogosResult — the glue re-materializes the Qt
     // LogosResult QVariant callers expect on the wire.
     QStringList resultMethods;
     for (const MethodDecl& md : module.methods)
-        if (md.resultReturn) resultMethods << md.name;
+        if (md.resultReturn) resultMethods << qs(md.name);
 
     QString c;
     QTextStream s(&c);

@@ -32,7 +32,6 @@
 #include <QJsonObject>
 
 #include "impl_header_parser.h"
-#include "lidl_parser.h"
 #include "lidl_emit_common.h"
 #include "lidl_gen_provider.h"
 #include "lidl_gen_cdylib_glue.h"
@@ -168,15 +167,15 @@ int main(int argc, char* argv[])
 
     QList<Out> outs;
     if (backend == "qt") {
-        outs.append({mod.name + "_qt_glue.h",
+        outs.append({qs(mod.name) + "_qt_glue.h",
                      lidlMakeProviderHeader(mod, implClass, implHeader)});
-        outs.append({mod.name + "_dispatch.cpp", lidlMakeProviderDispatch(mod)});
-        if (!mod.events.isEmpty())
-            outs.append({mod.name + "_events.cpp",
+        outs.append({qs(mod.name) + "_dispatch.cpp", lidlMakeProviderDispatch(mod)});
+        if (!mod.events.empty())
+            outs.append({qs(mod.name) + "_events.cpp",
                          lidlMakeEventsSource(mod, implClass, implHeader)});
     } else if (backend == "cdylib") {
-        outs.append({mod.name + "_cdylib_glue.h", lidlMakeCdylibGlueHeader(mod)});
-        outs.append({mod.name + "_cdylib_glue.cpp", lidlMakeCdylibGlueSource(mod)});
+        outs.append({qs(mod.name) + "_cdylib_glue.h", lidlMakeCdylibGlueHeader(mod)});
+        outs.append({qs(mod.name) + "_cdylib_glue.cpp", lidlMakeCdylibGlueSource(mod)});
     } else {
         err << "Unknown --backend: " << backend << " (expected qt|cdylib|ui)\n";
         return 2;

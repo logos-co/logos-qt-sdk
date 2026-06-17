@@ -8,26 +8,33 @@
       url = "github:logos-co/logos-protocol";
       inputs.logos-nix.follows = "logos-nix";
     };
+    # The canonical, language-neutral LIDL frontend the qt-generator links.
+    logos-lidl = {
+      url = "github:logos-co/logos-lidl";
+      inputs.logos-nix.follows = "logos-nix";
+    };
     # Test-only: logos-cpp-generator is used to generate the provider
     # dispatch fixture exercised by test_provider_dispatch.
     logos-cpp-sdk = {
       url = "github:logos-co/logos-cpp-sdk";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
+      inputs.logos-lidl.follows = "logos-lidl";
     };
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-protocol, logos-cpp-sdk }:
+  outputs = { self, nixpkgs, logos-nix, logos-protocol, logos-lidl, logos-cpp-sdk }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         pkgs = import nixpkgs { inherit system; };
         protocolLib = logos-protocol.packages.${system}.logos-protocol-lib;
         cppGenerator = logos-cpp-sdk.packages.${system}.cpp-generator;
+        lidlPkg = logos-lidl.packages.${system}.logos-lidl;
       });
     in
     {
-      packages = forAllSystems ({ pkgs, protocolLib, cppGenerator }:
+      packages = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg }:
         let
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
@@ -36,6 +43,7 @@
           qtGenerator = import ./nix/qt-generator.nix {
             inherit pkgs src;
             cppGeneratorBin = cppGenerator;
+            logos-lidl = lidlPkg;
           };
           include = import ./nix/include.nix { inherit pkgs common src; };
           tests = import ./nix/tests.nix { inherit pkgs common src protocolLib cppGenerator; };
@@ -57,7 +65,7 @@
         }
       );
 
-      checks = forAllSystems ({ pkgs, protocolLib, cppGenerator }:
+      checks = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg }:
         let
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
@@ -68,7 +76,7 @@
         }
       );
 
-      devShells = forAllSystems ({ pkgs, protocolLib, cppGenerator }: {
+      devShells = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.cmake
