@@ -7,5 +7,8 @@
 #include <QString>
 #include "lidl_compat.h"
 
-QString lidlMakeCdylibGlueHeader(const ModuleDecl& module);
-QString lidlMakeCdylibGlueSource(const ModuleDecl& module);
+// `multi` ⇒ the module was built with concurrency:"multi": also emit a
+// callMethodAsync override that drives the cdylib's logos_module_dispatch_async
+// (concurrent handler execution). Default false = single (sync callMethod only).
+QString lidlMakeCdylibGlueHeader(const ModuleDecl& module, bool multi = false);
+QString lidlMakeCdylibGlueSource(const ModuleDecl& module, bool multi = false);

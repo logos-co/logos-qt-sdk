@@ -77,6 +77,9 @@ int main(int argc, char* argv[])
     const QString implClass  = argValue(args, "--impl-class");
     const QString metadata   = argValue(args, "--metadata");
     const QString backend    = argValue(args, "--backend");
+    // concurrency:"multi" (from metadata.json, fed by the builder) ⇒ also emit the
+    // concurrent-dispatch glue (callMethodAsync over logos_module_dispatch_async).
+    const bool multi = argValue(args, "--concurrency") == QStringLiteral("multi");
     QString outputDir        = argValue(args, "--output-dir");
     QString implHeader       = argValue(args, "--impl-header");
 
@@ -174,8 +177,8 @@ int main(int argc, char* argv[])
             outs.append({qs(mod.name) + "_events.cpp",
                          lidlMakeEventsSource(mod, implClass, implHeader)});
     } else if (backend == "cdylib") {
-        outs.append({qs(mod.name) + "_cdylib_glue.h", lidlMakeCdylibGlueHeader(mod)});
-        outs.append({qs(mod.name) + "_cdylib_glue.cpp", lidlMakeCdylibGlueSource(mod)});
+        outs.append({qs(mod.name) + "_cdylib_glue.h", lidlMakeCdylibGlueHeader(mod, multi)});
+        outs.append({qs(mod.name) + "_cdylib_glue.cpp", lidlMakeCdylibGlueSource(mod, multi)});
     } else {
         err << "Unknown --backend: " << backend << " (expected qt|cdylib|ui)\n";
         return 2;
