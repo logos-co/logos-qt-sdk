@@ -38,7 +38,7 @@ QString lidlMakeCdylibGlueHeader(const ModuleDecl& module, bool multi)
         s << "#include <QVariantMap>\n";
         s << "#include <atomic>\n";
         s << "#include <cstdint>\n";
-        s << "#include <thread>\n";
+        s << "#include <QThread>\n";
     }
     s << "#include <nlohmann/json.hpp>\n\n";
 
@@ -162,10 +162,16 @@ QString lidlMakeCdylibGlueSource(const ModuleDecl& module, bool multi)
         s << "    const QString callId = QStringLiteral(\"lc-%1\").arg(\n";
         s << "        static_cast<qulonglong>(m_callCounter.fetch_add(1, std::memory_order_relaxed)));\n";
         s << "    EventCallback eventCb = m_eventCallback;  // copied for the worker\n";
+        // Run the handler on a real QThread, not a raw std::thread: if the handler
+        // makes an outbound module->module call it spins nested QEventLoops (to
+        // acquire the QtRO replica and await a deferred reply), and only a genuine
+        // QThread carries a Qt event dispatcher that can drive those — an adopted
+        // std::thread cannot pump the QtRO socket, so such calls would hang. The
+        // client stays owned by this worker (inline, no cross-thread marshaling).
         if (!resultMethods.isEmpty())
-            s << "    std::thread([method, dumped, isResultMethod, callId, eventCb]() {\n";
+            s << "    QThread* worker = QThread::create([method, dumped, isResultMethod, callId, eventCb]() {\n";
         else
-            s << "    std::thread([method, dumped, callId, eventCb]() {\n";
+            s << "    QThread* worker = QThread::create([method, dumped, callId, eventCb]() {\n";
         s << "        char* result = logos_module_dispatch(method.c_str(), dumped.c_str());\n";
         s << "        QVariant value;\n";
         s << "        if (result) {\n";
@@ -191,7 +197,9 @@ QString lidlMakeCdylibGlueSource(const ModuleDecl& module, bool multi)
         s << "        }\n";
         s << "        if (eventCb)\n";
         s << "            eventCb(logos::callCompleteEvent(), QVariantList{ callId, value });\n";
-        s << "    }).detach();\n";
+        s << "    });\n";
+        s << "    QObject::connect(worker, &QThread::finished, worker, &QThread::deleteLater);\n";
+        s << "    worker->start();\n";
         s << "    QVariantMap pending;\n";
         s << "    pending[logos::pendingCallKey()] = callId;\n";
         s << "    return pending;\n";
