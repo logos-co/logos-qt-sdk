@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <QtTest/QSignalSpy>
 #include <QJsonObject>
+#include "event_test_helpers.h"
 #include "logos_mock.h"
 #include "logos_api.h"
 #include "logos_provider_object.h"
@@ -156,6 +157,7 @@ TEST_F(ModuleProxyTest, EventForwarding)
     // When provider emits event, proxy should emit signal.
     m_provider->testEmitEvent("my_event", {QVariant("data")});
 
+    ASSERT_TRUE(waitForEvent([&] { return spy.count() == 1; }));
     EXPECT_EQ(spy.count(), 1);
     EXPECT_EQ(spy.at(0).at(0).toString(), "my_event");
     QVariantList data = spy.at(0).at(1).value<QVariantList>();

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <QCoreApplication>
 #include <QJsonObject>
+#include "event_test_helpers.h"
 #include "logos_mode.h"
 #include "logos_object.h"
 #include "logos_provider_object.h"
@@ -224,9 +225,12 @@ TEST_F(LocalTransportIntegrationTest, OnEventReceivesProviderEvents)
         receivedData = data;
     });
 
-    // Provider emits event -> ModuleProxy signal -> EventHelper -> callback
+    // Provider emits event -> ModuleProxy signal -> EventHelper -> callback.
+    // Delivery is now deferred, so wait for the callback
+    // to fire before asserting.
     m_provider->testEmitEvent("my_event", {QVariant(42)});
 
+    ASSERT_TRUE(waitForEvent([&] { return !receivedData.isEmpty(); }));
     EXPECT_EQ(receivedEvent, "my_event");
     ASSERT_EQ(receivedData.size(), 1);
     EXPECT_EQ(receivedData[0].toInt(), 42);
@@ -248,6 +252,7 @@ TEST_F(LocalTransportIntegrationTest, OnEventMultipleCallbacksSameEvent)
 
     m_provider->testEmitEvent("evt", {});
 
+    ASSERT_TRUE(waitForEvent([&] { return count1 == 1 && count2 == 1; }));
     EXPECT_EQ(count1, 1);
     EXPECT_EQ(count2, 1);
     obj->release();
@@ -267,10 +272,12 @@ TEST_F(LocalTransportIntegrationTest, OnEventDifferentEventsRouteCorrectly)
     obj->onEvent("eventB", [&](const QString&, const QVariantList&) { countB++; });
 
     m_provider->testEmitEvent("eventA", {});
+    ASSERT_TRUE(waitForEvent([&] { return countA == 1; }));
     EXPECT_EQ(countA, 1);
     EXPECT_EQ(countB, 0);
 
     m_provider->testEmitEvent("eventB", {});
+    ASSERT_TRUE(waitForEvent([&] { return countB == 1; }));
     EXPECT_EQ(countA, 1);
     EXPECT_EQ(countB, 1);
     obj->release();
@@ -291,10 +298,12 @@ TEST_F(LocalTransportIntegrationTest, DisconnectEventsStopsDelivery)
     obj->onEvent("evt", [&](const QString&, const QVariantList&) { count++; });
 
     m_provider->testEmitEvent("evt", {});
+    ASSERT_TRUE(waitForEvent([&] { return count == 1; }));
     EXPECT_EQ(count, 1);
 
     obj->disconnectEvents();
     m_provider->testEmitEvent("evt", {});
+    drainEvents();
     EXPECT_EQ(count, 1); // no increment after disconnect
     obj->release();
 }
@@ -314,11 +323,13 @@ TEST_F(LocalTransportIntegrationTest, ReleaseDisconnectsEvents)
     obj->onEvent("evt", [&](const QString&, const QVariantList&) { count++; });
 
     m_provider->testEmitEvent("evt", {});
+    ASSERT_TRUE(waitForEvent([&] { return count == 1; }));
     EXPECT_EQ(count, 1);
 
     obj->release();
 
     m_provider->testEmitEvent("evt", {});
+    drainEvents();
     EXPECT_EQ(count, 1); // no delivery after release
 }
 

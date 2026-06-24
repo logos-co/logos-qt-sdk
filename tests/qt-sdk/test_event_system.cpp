@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <QCoreApplication>
 #include <QtTest/QSignalSpy>
+#include "event_test_helpers.h"
 #include "logos_mock.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
@@ -242,9 +243,10 @@ TEST_F(LocalEventPipelineTest, FullEventPipelineProviderToConsumerObject)
     });
 
     // Provider emits -> LogosProviderBase.emitEvent -> callback -> ModuleProxy.emit eventResponse
-    // -> EventHelper.onEventResponse -> registered callback
+    // -> EventHelper.onEventResponse -> registered callback.
     m_provider->testEmitEvent("pipeline_evt", {QVariant("payload"), QVariant(99)});
 
+    ASSERT_TRUE(waitForEvent([&] { return !receivedData.isEmpty(); }));
     EXPECT_EQ(receivedEvent, "pipeline_evt");
     ASSERT_EQ(receivedData.size(), 2);
     EXPECT_EQ(receivedData[0].toString(), "payload");
@@ -265,15 +267,18 @@ TEST_F(LocalEventPipelineTest, EventNotDeliveredAfterDisconnect)
     obj->onEvent("evt", [&](const QString&, const QVariantList&) { count++; });
 
     m_provider->testEmitEvent("evt", {});
+    ASSERT_TRUE(waitForEvent([&] { return count == 1; }));
     EXPECT_EQ(count, 1);
 
     obj->disconnectEvents();
     m_provider->testEmitEvent("evt", {});
+    drainEvents();
     EXPECT_EQ(count, 1);
 
     // Re-register after disconnect
     obj->onEvent("evt", [&](const QString&, const QVariantList&) { count++; });
     m_provider->testEmitEvent("evt", {});
+    ASSERT_TRUE(waitForEvent([&] { return count == 2; }));
     EXPECT_EQ(count, 2);
     obj->release();
 }
@@ -328,6 +333,7 @@ TEST_F(LocalEventPipelineTest, WildcardSubscriptionReceivesEveryEvent)
     m_provider->testEmitEvent("beta",  {QVariant("two"), QVariant(2)});
     m_provider->testEmitEvent("gamma", {});
 
+    ASSERT_TRUE(waitForEvent([&] { return received.size() == 3; }));
     ASSERT_EQ(received.size(), 3);
     EXPECT_EQ(received[0].first, "alpha");
     EXPECT_EQ(received[0].second.size(), 1);
@@ -363,6 +369,7 @@ TEST_F(LocalEventPipelineTest, WildcardAndNamedSubscriptionsCoexist)
     m_provider->testEmitEvent("beta",  {});
     m_provider->testEmitEvent("alpha", {});
 
+    ASSERT_TRUE(waitForEvent([&] { return wildcardCount == 3 && alphaCount == 2; }));
     // Wildcard sees all 3, named-"alpha" sees 2.
     EXPECT_EQ(wildcardCount, 3);
     EXPECT_EQ(alphaCount, 2);
@@ -386,6 +393,7 @@ TEST_F(LocalEventPipelineTest, MultipleWildcardSubscribersAllReceive)
     m_provider->testEmitEvent("evt1", {});
     m_provider->testEmitEvent("evt2", {});
 
+    ASSERT_TRUE(waitForEvent([&] { return countA == 2 && countB == 2; }));
     EXPECT_EQ(countA, 2);
     EXPECT_EQ(countB, 2);
     obj->release();
@@ -407,6 +415,8 @@ TEST_F(LocalEventPipelineTest, NamedSubscriberDoesNotReceiveOtherEvents)
     m_provider->testEmitEvent("alpha", {});
     m_provider->testEmitEvent("gamma", {});
 
+    ASSERT_TRUE(waitForEvent([&] { return alphaCount == 1; }));
+    drainEvents();  // ensure the non-matching emits are also processed
     EXPECT_EQ(alphaCount, 1);
     obj->release();
 }
@@ -439,6 +449,7 @@ TEST_F(LocalEventPipelineTest, ConsumerOnEventRegistersCallback)
     // Provider emits event
     m_provider->testEmitEvent("client_evt", {QVariant("via_client")});
 
+    ASSERT_TRUE(waitForEvent([&] { return !receivedData.isEmpty(); }));
     EXPECT_EQ(receivedName, "client_evt");
     ASSERT_EQ(receivedData.size(), 1);
     EXPECT_EQ(receivedData[0].toString(), "via_client");
