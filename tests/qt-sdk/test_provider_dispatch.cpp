@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QJsonObject>
 #include <QtTest/QSignalSpy>
+#include "event_test_helpers.h"
 #include "logos_mock.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
@@ -273,9 +274,11 @@ TEST_F(ProviderDispatchLocalStackTest, EventsThroughFullStack)
         receivedData = data;
     });
 
-    // Call testEvent which emits an event internally
+    // Call testEvent which emits an event internally. The event delivery is
+    // deferred; wait for the callback before asserting.
     obj->callMethod("auth", "testEvent", {QVariant("hello events")}, 5000);
 
+    ASSERT_TRUE(waitForEvent([&] { return !receivedData.isEmpty(); }));
     EXPECT_EQ(receivedEvent, "testEvent");
     ASSERT_EQ(receivedData.size(), 1);
     EXPECT_EQ(receivedData[0].toString(), "hello events");
