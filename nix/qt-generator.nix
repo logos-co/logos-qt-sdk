@@ -18,6 +18,8 @@ pkgs.stdenv.mkDerivation {
     pkgs.ninja
     pkgs.qt6.wrapQtAppsNoGuiHook
   ];
+
+  dontWrapQtApps = true;
   buildInputs = [ pkgs.qt6.qtbase logos-lidl ];
 
   cmakeFlags = [
