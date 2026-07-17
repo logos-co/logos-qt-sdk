@@ -75,6 +75,42 @@ namespace {
                     );
                     break;
                 }
+                case QMetaType::LongLong: {
+                    auto value = new qlonglong{arg.toLongLong()};
+                    scopedArgs.emplace_back(
+                        Q_ARG(qlonglong, *value),
+                        [](const void* data) { delete static_cast<const qlonglong*>(data); }
+                    );
+                    break;
+                }
+                case QMetaType::ULongLong: {
+                    auto value = new qulonglong{arg.toULongLong()};
+                    scopedArgs.emplace_back(
+                        Q_ARG(qulonglong, *value),
+                        [](const void* data) { delete static_cast<const qulonglong*>(data); }
+                    );
+                    break;
+                }
+                // A typed-numeric array ([int]/[uint]/[float64]/[bool]) maps to
+                // QVariantList (only [tstr] maps to QStringList). Without this
+                // case such an arg fell to the QString default below, stringified
+                // to "" and failed the typed invokeMethod → an EMPTY list arrived.
+                case QMetaType::QVariantList: {
+                    auto value = new QVariantList{arg.toList()};
+                    scopedArgs.emplace_back(
+                        Q_ARG(QVariantList, *value),
+                        [](const void* data) { delete static_cast<const QVariantList*>(data); }
+                    );
+                    break;
+                }
+                case QMetaType::QVariantMap: {
+                    auto value = new QVariantMap{arg.toMap()};
+                    scopedArgs.emplace_back(
+                        Q_ARG(QVariantMap, *value),
+                        [](const void* data) { delete static_cast<const QVariantMap*>(data); }
+                    );
+                    break;
+                }
                 case QMetaType::QStringList: {
                     auto value = new QStringList{arg.toStringList()};
                     scopedArgs.emplace_back(
