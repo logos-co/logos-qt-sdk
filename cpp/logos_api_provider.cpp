@@ -128,9 +128,11 @@ bool LogosAPIProvider::registerObject(const QString& name, LogosProviderObject* 
 
 void LogosAPIProvider::setTokenValidator(TokenValidator validator)
 {
-    m_pendingValidator = validator;
+    // Store first, then forward the member — a single source of truth, so the
+    // proxy and the pending copy can't diverge if the validator carries state.
+    m_pendingValidator = std::move(validator);
     if (m_moduleProxy) {
-        m_moduleProxy->setTokenValidator(std::move(validator));
+        m_moduleProxy->setTokenValidator(m_pendingValidator);
     }
 }
 
