@@ -180,7 +180,10 @@ TEST_F(AsyncCallsTest, AsyncNullCallbackDoesNotCrash)
     m_mock->when("mod", "fn").thenReturn(QVariant(1));
     createApi();
 
-    m_client->invokeRemoteMethodAsync("mod", "fn", QVariantList(), nullptr);
+    // A bare nullptr is ambiguous between the AsyncResultCallback and the
+    // AsyncResultErrorCallback overloads; pin the result-callback one.
+    m_client->invokeRemoteMethodAsync("mod", "fn", QVariantList(),
+                                      static_cast<LogosAPIClient::AsyncResultCallback>(nullptr));
     QCoreApplication::processEvents();
     // no crash = pass
 }
