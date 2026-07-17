@@ -126,9 +126,22 @@ bool LogosAPIProvider::registerObject(const QString& name, LogosProviderObject* 
     return publishProvider(name, provider);
 }
 
+void LogosAPIProvider::setTokenValidator(TokenValidator validator)
+{
+    m_pendingValidator = validator;
+    if (m_moduleProxy) {
+        m_moduleProxy->setTokenValidator(std::move(validator));
+    }
+}
+
 bool LogosAPIProvider::publishProvider(const QString& name, LogosProviderObject* provider)
 {
     m_moduleProxy = new ModuleProxy(provider, this);
+    // Apply a validator installed before registration, before the proxy is
+    // published on any transport (so no call can slip in unvalidated).
+    if (m_pendingValidator) {
+        m_moduleProxy->setTokenValidator(m_pendingValidator);
+    }
 
     // Publish on every configured transport. Success = any transport
     // accepted the publish (follow-up: surface per-transport failures).

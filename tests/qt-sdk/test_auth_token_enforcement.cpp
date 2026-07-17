@@ -189,6 +189,58 @@ TEST_F(AuthTokenEnforcementTest, WrongTokenBlockedCorrectTokenAllowed)
     EXPECT_EQ(m_provider->lastArgs[0].toInt(), 7);
 }
 
+// ── Host-installed token validator (the seam the daemon backs with
+//    TokenStore::lookupByToken so operator-issued named tokens authorize) ──────
+
+TEST_F(AuthTokenEnforcementTest, ValidatorAcceptsTokenTheBuiltinScanRejects)
+{
+    ModuleProxy proxy(m_provider);
+    // No built-in token issued. A validator (stand-in for the daemon's
+    // TokenStore-backed check) accepts this specific token for a local call.
+    proxy.setTokenValidator([](const QString& token, const QString& transport) {
+        return token == "named-tok" && transport == "local";
+    });
+
+    QVariant r = proxy.callRemoteMethod("named-tok", "privilegedMethod", {QVariant(1)});
+    EXPECT_EQ(r.toString(), "dispatched");
+    EXPECT_EQ(m_provider->lastMethodCalled, "privilegedMethod");
+}
+
+TEST_F(AuthTokenEnforcementTest, ValidatorSeesTransportAndCanEnforceLocalOnly)
+{
+    ModuleProxy proxy(m_provider);
+    // A "local_only" validator: accept the token only over the local transport.
+    proxy.setTokenValidator([](const QString& token, const QString& transport) {
+        return token == "local-only-tok" && transport == "local";
+    });
+
+    // The 3-arg form implies transport == "local" -> accepted.
+    QVariant okLocal = proxy.callRemoteMethod("local-only-tok", "privilegedMethod", {QVariant(1)});
+    EXPECT_EQ(okLocal.toString(), "dispatched");
+
+    m_provider->lastMethodCalled.clear();
+
+    // Same token presented over tcp -> the validator rejects it, so the call
+    // is not dispatched. This is how a leaked local_only token is blocked
+    // over the network.
+    QVariant overTcp = proxy.callRemoteMethod("local-only-tok", "privilegedMethod",
+                                              {QVariant(1)}, QStringLiteral("tcp"));
+    EXPECT_FALSE(overTcp.isValid());
+    EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty());
+}
+
+TEST_F(AuthTokenEnforcementTest, ValidatorIsAdditiveNotAReplacement)
+{
+    ModuleProxy proxy(m_provider);
+    // A validator that rejects everything must not disable the built-in scan —
+    // a token issued through TokenManager still authorizes.
+    proxy.setTokenValidator([](const QString&, const QString&) { return false; });
+    TokenManager::instance().saveToken("caller_mod", "issued-tok");
+
+    QVariant r = proxy.callRemoteMethod("issued-tok", "privilegedMethod", {QVariant(1)});
+    EXPECT_EQ(r.toString(), "dispatched");
+}
+
 // ── Introspection stays reachable (used for interface discovery during the
 //    handshake, before a token exists; also exposed via a separate ungated
 //    transport channel). Gating it here would be false security and would break

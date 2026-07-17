@@ -8,6 +8,7 @@
 #include <QVariant>
 #include <QVariantList>
 #include <QMap>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -72,6 +73,16 @@ public:
     QString registryUrl() const;
     bool saveToken(const QString& from_module_name, const QString& token);
 
+    // Install an extra token authorizer, forwarded to the ModuleProxy. Consulted
+    // in addition to the built-in issued-token scan, with the call's transport
+    // ("local" | "tcp" | "tcp_ssl") so local_only tokens can be enforced. The
+    // daemon backs this with TokenStore::lookupByToken so operator-issued named
+    // tokens authorize. Safe to call before or after registerObject(); a
+    // validator set before registration is applied when the proxy is created.
+    using TokenValidator = std::function<bool(const QString& token,
+                                              const QString& transportProtocol)>;
+    void setTokenValidator(TokenValidator validator);
+
 public slots:
     void onEventResponse(LogosObject* object, const QString& eventName, const QVariantList& data);
 
@@ -83,6 +94,8 @@ private:
     QString m_registryUrl;
     QMap<QString, QString> m_tokens;
     ModuleProxy* m_moduleProxy;
+    // Held until the proxy exists (registerObject may come after the setter).
+    TokenValidator m_pendingValidator;
     QtProviderObject* m_qtProviderObject;
     QString m_registeredObjectName;
 };
