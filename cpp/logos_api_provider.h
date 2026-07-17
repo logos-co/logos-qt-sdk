@@ -94,10 +94,14 @@ private:
     QString m_registryUrl;
     QMap<QString, QString> m_tokens;
     ModuleProxy* m_moduleProxy;
-    // Held until the proxy exists (registerObject may come after the setter).
-    TokenValidator m_pendingValidator;
     QtProviderObject* m_qtProviderObject;
     QString m_registeredObjectName;
+    // Appended (never inserted mid-list): keeps every pre-existing member's
+    // offset identical between builds, so a LogosAPIProvider is layout-safe even
+    // if a future co-located consumer ever accessed one across a version
+    // boundary. Held until the proxy exists (registerObject may come after the
+    // setter).
+    TokenValidator m_pendingValidator;
 };
 
 #endif // LOGOS_API_PROVIDER_H
