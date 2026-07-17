@@ -140,8 +140,11 @@ TEST_F(LogosApiClientOverloadsTest, AsyncFiveArgs)
 
 TEST_F(LogosApiClientOverloadsTest, AsyncNullCallbackIgnored)
 {
-    // Should not crash
-    m_client->invokeRemoteMethodAsync("mod", "fn", QVariantList(), nullptr);
+    // Should not crash. A bare nullptr is ambiguous now that there is also an
+    // AsyncResultErrorCallback overload (both are std::functions nullptr can
+    // fill), so pin the result-callback overload explicitly.
+    m_client->invokeRemoteMethodAsync("mod", "fn", QVariantList(),
+                                      static_cast<LogosAPIClient::AsyncResultCallback>(nullptr));
     QCoreApplication::processEvents();
 }
 
