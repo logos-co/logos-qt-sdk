@@ -19,7 +19,11 @@ QString lidlMakeCdylibGlueHeader(const ModuleDecl& module, bool multi)
     s << "#pragma once\n\n";
     s << "#include \"interface.h\"\n";
     s << "#include \"logos_api.h\"\n";
+    s << "#include \"logos_api_client.h\"\n";
+    s << "#include \"token_manager.h\"\n";
     s << "#include \"logos_provider_object.h\"\n";
+    s << "#include <cstdlib>\n";
+    s << "#include <cstring>\n";
     s << "#include \"logos_json_convert.h\"\n";
     s << "#include \"logos_module_impl.h\"\n";
     s << "#include \"logos_types.h\"\n";
@@ -66,6 +70,13 @@ QString lidlMakeCdylibGlueHeader(const ModuleDecl& module, bool multi)
     s << "private:\n";
     s << "    EventCallback m_eventCallback;\n";
     s << "    static void emitTrampoline(const char* eventName, const char* dataJson, void* userData);\n";
+    // Token-bridge trampolines — installed via logos_module_set_token_bridge in
+    // onInit. They give a token-authority (LogosTokenManagerContext) impl access
+    // to the host's token store + arbitrary-module inform, using this provider's
+    // LogosAPI. Inert for any impl that doesn't call them.
+    s << "    static char* tokenGetTrampoline(void* userData, const char* moduleName);\n";
+    s << "    static int tokenInformTrampoline(void* userData, const char* target, const char* targetToken, const char* caller, const char* newToken);\n";
+    s << "    static void tokenFreeTrampoline(void* userData, char* s);\n";
     if (multi)
         s << "    std::atomic<std::uint64_t> m_callCounter{0};  // unique deferred-call ids\n";
     s << "};\n\n";
@@ -241,9 +252,46 @@ QString lidlMakeCdylibGlueSource(const ModuleDecl& module, bool multi)
     s << "                          logos::nlohmannArgsToQVariantList(payload));\n";
     s << "}\n\n";
 
+    // -- token-bridge trampolines (host services for a token-authority impl) --
+    s << "char* " << provider << "::tokenGetTrampoline(void* userData, const char* moduleName)\n{\n";
+    s << "    auto* self = static_cast<" << provider << "*>(userData);\n";
+    s << "    if (!self || !self->logosAPI() || !moduleName) return nullptr;\n";
+    s << "    const QString tok = self->logosAPI()->getTokenManager()->getToken(QString::fromUtf8(moduleName));\n";
+    s << "    if (tok.isEmpty()) return nullptr;\n";
+    s << "    const QByteArray utf8 = tok.toUtf8();\n";
+    s << "    char* out = static_cast<char*>(std::malloc(utf8.size() + 1));\n";
+    s << "    if (out) std::memcpy(out, utf8.constData(), utf8.size() + 1);\n";
+    s << "    return out;  // freed by the module via tokenFreeTrampoline\n";
+    s << "}\n\n";
+
+    s << "int " << provider << "::tokenInformTrampoline(void* userData, const char* target,\n";
+    s << "        const char* targetToken, const char* caller, const char* newToken)\n{\n";
+    s << "    auto* self = static_cast<" << provider << "*>(userData);\n";
+    s << "    if (!self || !self->logosAPI() || !target || !targetToken || !caller || !newToken) return 1;\n";
+    // getClient constructs/caches on the LogosAPI's owner thread, and
+    // informModuleToken_module marshals onto it (runOnOwnerThread) — both safe to
+    // call from the concurrency:"multi" worker thread the dispatch runs on.
+    s << "    LogosAPIClient* client = self->logosAPI()->getClient(QString::fromUtf8(target));\n";
+    s << "    if (!client) return 1;\n";
+    s << "    const bool ok = client->informModuleToken_module(\n";
+    s << "        QString::fromUtf8(targetToken), QString::fromUtf8(target),\n";
+    s << "        QString::fromUtf8(caller), QString::fromUtf8(newToken));\n";
+    s << "    return ok ? 0 : 1;\n";
+    s << "}\n\n";
+
+    s << "void " << provider << "::tokenFreeTrampoline(void* /*userData*/, char* s)\n{\n";
+    s << "    std::free(s);  // symmetric with the std::malloc in tokenGetTrampoline\n";
+    s << "}\n\n";
+
     s << "void " << provider << "::onInit(LogosAPI* api)\n{\n";
     s << "    QObject* obj = api;\n";
     s << "    if (!obj) return;\n";
+    // Install the token bridge (inert unless the impl derives
+    // LogosTokenManagerContext). The module keeps these pointers and calls back
+    // through them for its token-store reads + arbitrary-module informs.
+    s << "    logos_module_set_token_bridge(&" << provider << "::tokenGetTrampoline,\n";
+    s << "                                  &" << provider << "::tokenInformTrampoline,\n";
+    s << "                                  &" << provider << "::tokenFreeTrampoline, this);\n";
     s << "    // Token FIRST: the cdylib runs its own protocol stack (a separate\n";
     s << "    // static copy with its own TokenManager). Seed it with the\n";
     s << "    // host-issued auth token the initializer surfaces as a property\n";
