@@ -21,6 +21,7 @@
 #include "logos_provider_object.h"
 #include "qt_provider_object.h"
 #include "module_proxy.h"
+#include "logos_rpc_status.h"
 #include "token_manager.h"
 #include "logos_mode.h"
 #include "logos_object.h"
@@ -88,6 +89,12 @@ protected:
 };
 
 // ── F-001: dispatch must reject unauthorized tokens ─────────────────────────
+//
+// A rejected call now returns the structured "unauthorized" sentinel
+// (logos_rpc_status.h) instead of a bare QVariant(), so a consumer can detect
+// the rejection and re-exchange its stale token. The security property these
+// tests pin down is unchanged: the provider method is NEVER dispatched
+// (lastMethodCalled stays empty) and the sentinel is not a dispatched result.
 
 TEST_F(AuthTokenEnforcementTest, RejectsGarbageTokenForNewApiProvider)
 {
@@ -96,7 +103,8 @@ TEST_F(AuthTokenEnforcementTest, RejectsGarbageTokenForNewApiProvider)
     // No token was ever issued to any caller. A peer supplies a garbage token.
     QVariant r = proxy.callRemoteMethod("garbage-token", "privilegedMethod", {QVariant(1)});
 
-    EXPECT_FALSE(r.isValid()) << "unauthorized call must not return a dispatched result";
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(r))
+        << "unauthorized call must return the rejection sentinel, not a dispatched result";
     EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty())
         << "provider method must NOT be dispatched without a valid token (F-001)";
 }
@@ -107,7 +115,7 @@ TEST_F(AuthTokenEnforcementTest, RejectsEmptyToken)
 
     QVariant r = proxy.callRemoteMethod("", "privilegedMethod", {QVariant(1)});
 
-    EXPECT_FALSE(r.isValid());
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(r));
     EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty())
         << "empty token must be rejected (fail-closed)";
 }
@@ -150,7 +158,7 @@ TEST_F(AuthTokenEnforcementTest, RejectsTokenNotMatchingAnyIssued)
 
     QVariant r = proxy.callRemoteMethod("some-other-token", "privilegedMethod", {QVariant(1)});
 
-    EXPECT_FALSE(r.isValid());
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(r));
     EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty())
         << "a token never issued by this module must not be honoured (replay/forge)";
 }
@@ -167,7 +175,7 @@ TEST_F(AuthTokenEnforcementTest, WrongTokenBlockedCorrectTokenAllowed)
 
     // 1) Wrong token: must NOT dispatch, must NOT return a result.
     QVariant wrong = proxy.callRemoteMethod("not-the-token", "privilegedMethod", {QVariant(1)});
-    EXPECT_FALSE(wrong.isValid()) << "wrong token must not produce a result";
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(wrong)) << "wrong token must not produce a dispatched result";
     EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty())
         << "wrong token must not reach the provider (the F-001 guard)";
     EXPECT_TRUE(m_provider->lastArgs.isEmpty())
@@ -230,7 +238,7 @@ TEST_F(LegacyPluginAuthTest, RejectsGarbageTokenForLegacyQObjectPlugin)
     QVariant r = proxy.callRemoteMethod("garbage-token", "deleteAllData",
                                         {QVariant("everything")});
 
-    EXPECT_FALSE(r.isValid());
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(r));
     EXPECT_FALSE(m_plugin->privilegedCalled)
         << "legacy QObject privileged method invoked with no valid token (F-002)";
 }
@@ -291,7 +299,7 @@ TEST_F(AuthEnforcementTransportTest, WrongTokenBlockedThroughTransport)
 
     // A peer with the wrong token hits the published object directly.
     QVariant r = obj->callMethod("forged-token", "privilegedMethod", {QVariant(1)}, 5000);
-    EXPECT_FALSE(r.isValid());
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(r));
     EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty())
         << "forged token must not reach the provider through the transport";
 
