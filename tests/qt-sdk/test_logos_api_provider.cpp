@@ -5,6 +5,7 @@
 #include "logos_provider_object.h"
 #include "logos_mode.h"
 #include "logos_object.h"
+#include "logos_rpc_status.h"
 #include "plugin_registry.h"
 #include "token_manager.h"
 #include "implementations/qt_local/local_transport.h"
@@ -166,7 +167,7 @@ TEST_F(ProviderTokenValidatorTest, ValidatorSetBeforeRegisterIsApplied)
     // A token only the validator accepts -> dispatched.
     EXPECT_EQ(callThroughProxy("named-tok").toString(), "dispatched");
     // A token nobody accepts -> rejected (no dispatch).
-    EXPECT_FALSE(callThroughProxy("garbage-tok").isValid());
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(callThroughProxy("garbage-tok")));
 }
 
 TEST_F(ProviderTokenValidatorTest, ValidatorSetAfterRegisterIsApplied)
@@ -183,5 +184,5 @@ TEST_F(ProviderTokenValidatorTest, ValidatorSetAfterRegisterIsApplied)
     });
 
     EXPECT_EQ(callThroughProxy("named-tok").toString(), "dispatched");
-    EXPECT_FALSE(callThroughProxy("garbage-tok").isValid());
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(callThroughProxy("garbage-tok")));
 }

@@ -225,7 +225,8 @@ TEST_F(AuthTokenEnforcementTest, ValidatorSeesTransportAndCanEnforceLocalOnly)
     // over the network.
     QVariant overTcp = proxy.callRemoteMethod("local-only-tok", "privilegedMethod",
                                               {QVariant(1)}, QStringLiteral("tcp"));
-    EXPECT_FALSE(overTcp.isValid());
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(overTcp))
+        << "a local_only token over tcp must be rejected with the sentinel";
     EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty());
 }
 
