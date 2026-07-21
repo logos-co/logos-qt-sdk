@@ -100,9 +100,18 @@ TEST_F(AsyncCallsTest, AsyncCallWithVariantListResult)
 
 TEST_F(AsyncCallsTest, AsyncUserCallbackRunsBeforeMockLogosObjectRelease)
 {
-    // Regression: LogosAPIConsumer must invoke the user callback before plugin->release().
-    // Releasing the mock/replica first can invalidate QVariant payloads (e.g. remote lists),
-    // which manifested as crashes inside Qt when converting the async result.
+    // Two properties, one test:
+    //  1. Safety: LogosAPIConsumer must invoke the user callback before the
+    //     underlying replica is released. Releasing first can invalidate the
+    //     QVariant payload (e.g. a remote list), which manifested as crashes
+    //     inside Qt when converting the async result. Asserted in-callback via
+    //     releaseCount == 0.
+    //  2. Caching: LogosAPIConsumer caches the acquired replica
+    //     (acquireCachedObject / m_objectCache) and reuses it across calls
+    //     instead of releasing it per call, so a completed async call leaves
+    //     releaseCount == 0. The cached replica is released exactly once, on
+    //     consumer teardown (clearObjectCache from ~LogosAPIConsumer), which we
+    //     drive here by destroying the client/api.
     std::atomic<int> releaseCount{0};
     MockStore::instance().setMockObjectReleaseProbe(&releaseCount);
 
@@ -122,7 +131,20 @@ TEST_F(AsyncCallsTest, AsyncUserCallbackRunsBeforeMockLogosObjectRelease)
 
     QCoreApplication::processEvents();
     EXPECT_TRUE(userCallbackRan);
-    EXPECT_EQ(releaseCount.load(), 1);
+    EXPECT_EQ(releaseCount.load(), 0)
+        << "consumer must cache the replica across calls, not release it per call";
+
+    // Tearing down the client (and its child LogosAPIConsumer) releases the
+    // cached replica exactly once via clearObjectCache().
+    delete m_api;
+    m_api = nullptr; // prevent double-delete in TearDown()
+    QCoreApplication::processEvents();
+    EXPECT_EQ(releaseCount.load(), 1)
+        << "cached replica must be released once on consumer teardown";
+
+    // releaseCount is a stack local; drop the probe before it goes out of scope
+    // so fixture teardown can't dereference a dangling pointer.
+    MockStore::instance().setMockObjectReleaseProbe(nullptr);
 }
 
 TEST_F(AsyncCallsTest, AsyncCallWithVariantMapResult)
