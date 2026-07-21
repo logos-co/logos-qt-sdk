@@ -27,6 +27,7 @@
 #include "logos_api.h"
 #include "logos_provider_object.h"
 #include "module_proxy.h"
+#include "logos_rpc_status.h"
 #include "token_manager.h"
 
 // Minimal new-API provider whose privileged method records when it is reached.
@@ -120,8 +121,11 @@ TEST_F(InformModuleTokenAuthTest, PeerCannotPlantTokenThenAuthorizeCall)
     // 3) ...and presenting them to callRemoteMethod must NOT authorize a call.
     QVariant r1 = proxy.callRemoteMethod("PWN-TOKEN", "privilegedMethod", {QVariant(1)});
     QVariant r2 = proxy.callRemoteMethod("PWN-TOKEN-2", "privilegedMethod", {QVariant(1)});
-    EXPECT_FALSE(r1.isValid());
-    EXPECT_FALSE(r2.isValid());
+    // Rejected calls now return the structured "unauthorized" sentinel (a NEW
+    // consumer re-exchanges on it); OLD consumers still see it as empty. The
+    // security property below (never reaches the provider) is what matters.
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(r1));
+    EXPECT_TRUE(logos::isUnauthorizedSentinel(r2));
     EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty())
         << "a planted token must never reach the provider — the capability gate "
            "must hold (F-002)";
