@@ -61,20 +61,53 @@ static QString stdReturnToQt(const TypeExpr& te, const QString& varName)
     return varName;
 }
 
+// The std spelling of a LIDL primitive, for checking the ELEMENTS of an array
+// whose Qt spelling (QVariantList) has erased them. Empty = no rule.
+static QString lidlPrimitiveStdType(const TypeExpr& te)
+{
+    if (te.kind != TypeExpr::Primitive) return QString();
+    if (te.name == "tstr")    return "std::string";
+    if (te.name == "bstr")    return "std::vector<uint8_t>";
+    if (te.name == "int")     return "int64_t";
+    if (te.name == "uint")    return "uint64_t";
+    if (te.name == "float64") return "double";
+    if (te.name == "bool")    return "bool";
+    return QString();
+}
+
+// Incoming argument -> the declared type.
+//
+// This used to be the Qt coercions (`.toInt()`, `.toBool()`, `.toList()`),
+// which is the same defect the header-scanning generator and the QMetaObject
+// dispatch had: echoUint(-1) reached the author's body as 18446744073709551615
+// and echoMap(5) as {}, where every non-Qt provider answers
+// {"code":"dispatch_failed"}. The rule is the canonical codec's — see
+// logos-protocol/cpp/logos_qt_arg_decode.h.
+//
+// This backend is not wired into module-builder's autoCodegen yet; it is fixed
+// with the other two so the bug is not waiting for whoever wires it up. Being
+// LIDL-driven it can do strictly MORE than they can: a `[uint]` parameter is
+// just QVariantList in a C++ signature, but the declaration still names the
+// element type, so the elements are checked here.
 static QString variantToQtArg(const TypeExpr& te, int argIdx)
 {
-    QString a = "args.at(" + QString::number(argIdx) + ")";
-    QString qt = lidlTypeToQt(te);
-    if (qt == "QString")     return a + ".toString()";
-    if (qt == "QByteArray")  return a + ".toByteArray()";
-    if (qt == "int")         return a + ".toInt()";
-    if (qt == "double")      return a + ".toDouble()";
-    if (qt == "bool")        return a + ".toBool()";
-    if (qt == "QStringList") return a + ".toStringList()";
-    if (qt == "QVariantList") return a + ".toList()";
-    if (qt == "QVariantMap") return a + ".toMap()";
-    if (qt == "LogosResult") return a + ".value<LogosResult>()";
-    return a;
+    const QString a = "args.at(" + QString::number(argIdx) + ")";
+    const QString path = "arg" + QString::number(argIdx);
+    const QString qt = lidlTypeToQt(te);
+
+    if (qt == "QVariantList" && te.kind == TypeExpr::Array && te.elements.size() == 1) {
+        const QString elem = lidlPrimitiveStdType(te.elements[0]);
+        if (!elem.isEmpty())
+            return "logos::qtArgListOf<" + elem + ">(" + a + ", \"" + path + "\")";
+    }
+
+    static const QSet<QString> codecKnown = {
+        "bool", "int", "qlonglong", "qulonglong", "double", "float",
+        "QString", "QStringList", "QByteArray", "QJsonArray", "QJsonObject",
+        "QVariantList", "QVariantMap", "QVariant", "LogosResult"
+    };
+    if (!codecKnown.contains(qt)) return a;
+    return "logos::qtArgFromVariant<" + qt + ">(" + a + ", \"" + path + "\")";
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +435,7 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
     s << "#include <QVariant>\n";
     s << "#include <QString>\n";
     s << "#include \"logos_types.h\"\n";
+    s << "#include \"logos_qt_arg_decode.h\"\n";
     s << "#include <exception>\n\n";
 
     // --- callMethod ---
@@ -436,6 +470,14 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
         s << "    }\n";
     }
 
+    // An argument the declared type cannot represent is a REJECTED call, not a
+    // failed one — the canonical {"code":"dispatch_failed", ...} object, the
+    // same answer the cdylib dispatch and the Rust provider give.
+    s << "    } catch (const logos::CodecError& e) {\n";
+    s << "        qWarning() << \"" << providerObjectClass
+      << "::callMethod:\" << methodName << \"rejected:\" << e.what();\n";
+    s << "        return logos::dispatchFailedVariant(providerName(), "
+         "QString::fromUtf8(e.what()));\n";
     s << "    } catch (const std::exception& e) {\n";
     s << "        qWarning() << \"" << providerObjectClass
       << "::callMethod:\" << methodName << \"failed:\" << e.what();\n";

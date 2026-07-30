@@ -3,6 +3,7 @@
 #include "logos_api.h"
 #include "token_manager.h"
 #include "logos_types.h"
+#include "logos_qt_arg_decode.h"
 #include <QDebug>
 #include <QMetaObject>
 #include <QMetaMethod>
@@ -345,10 +346,40 @@ QVariant QtProviderObject::callMethod(const QString& methodName, const QVariantL
     QMetaMethod method = metaObject->method(methodIndex);
     QMetaType returnType = method.returnMetaType();
 
-    // Coerce args to the types the method actually declares.
+    // Decode args against the types the method actually declares.
+    //
+    // This used to be a bare QVariant::convert(paramType), which COERCES: an
+    // argument the declared type cannot represent silently became one it can
+    // (echoInt(3.7) ran the body with 4; echoBool("hello") with true;
+    // stringLength(42) with "42"), so the author's own precondition checks
+    // never saw the value the caller sent. logos::qtArgDecode routes the value
+    // through the canonical codec instead — the same rule the cdylib dispatch,
+    // the Rust provider and the plain wire apply — and a mismatch becomes the
+    // canonical {"code":"dispatch_failed", ...} answer rather than a plausible
+    // wrong value.
+    //
+    // A type the codec has no rule for (QUrl, an enum, a pointer) reports
+    // Unchecked and keeps the old conversion verbatim: inventing a rule for it
+    // here would reject arguments that work today.
     QVariantList coercedArgs = args;
     for (int i = 0; i < method.parameterCount() && i < coercedArgs.size(); ++i) {
         QMetaType paramType = method.parameterMetaType(i);
+
+        QVariant decoded;
+        std::string reason;
+        const logos::QtArgVerdict verdict = logos::qtArgDecode(
+            coercedArgs[i], paramType, "arg" + std::to_string(i), decoded, reason);
+
+        if (verdict == logos::QtArgVerdict::Rejected) {
+            const QString message = QString::fromStdString(reason);
+            qWarning() << "[LogosProviderObject] QtProviderObject: rejected"
+                       << methodName << "-" << message;
+            return logos::dispatchFailedVariant(providerName(), message);
+        }
+        if (verdict == logos::QtArgVerdict::Ok) {
+            coercedArgs[i] = decoded;
+            continue;
+        }
         if (coercedArgs[i].metaType() != paramType) {
             QVariant converted = coercedArgs[i];
             if (converted.convert(paramType)) {

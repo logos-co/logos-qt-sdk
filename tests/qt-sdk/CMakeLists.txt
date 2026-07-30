@@ -34,6 +34,10 @@ add_executable(qt_sdk_tests
     test_event_system.cpp
     test_async_calls.cpp
     test_provider_dispatch.cpp
+    # Provider-side ARGUMENT decoding (registry entry Q1) for both Qt provider
+    # sites — the generated dispatch and the QMetaObject one. Carries the four
+    # typed-array cases the logoscore CLI cannot express as arguments.
+    test_provider_arg_validation.cpp
     test_std_string_overloads.cpp
     fixtures/sample_provider.cpp
     ${GENERATED_DISPATCH}
