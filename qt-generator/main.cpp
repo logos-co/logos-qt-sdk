@@ -16,6 +16,13 @@
 //   --backend cdylib  the uniform Qt glue over the module-impl C ABI:
 //                       <name>_cdylib_glue.{h,cpp}
 //                       (the C-ABI impl-exports come from logos-cpp-generator)
+//   --backend consumer  the Qt-TYPED CONSUMER wrapper for a dependency /
+//                       interface: <name>_api.{h,cpp}. Same public surface the
+//                       legacy Qt wrapper had; the bodies convert at the edge
+//                       and delegate to the lp path, so there is one transport,
+//                       one codec and one Qt type mapper under both consumer
+//                       surfaces instead of two parallel implementations.
+//                       [--module <dep-name>] [--class <C>] [--bind static|bound]
 //   --backend ui      UI plugin backend (type=ui_qml + interface=universal):
 //                       --metadata <m.json> --rep <view.rep>
 //                       [--backend-class C] [--backend-header h]
@@ -36,6 +43,7 @@
 #include "lidl_gen_provider.h"
 #include "lidl_gen_cdylib_glue.h"
 #include "lidl_gen_ui.h"
+#include "lidl_gen_qt_consumer.h"
 
 namespace {
 
@@ -135,7 +143,7 @@ int main(int argc, char* argv[])
         || (fromHeader && (implClass.isEmpty() || metadata.isEmpty()))) {
         err << "Usage: logos-qt-generator (--from-header <impl.h> --impl-class <C>\n"
                "         --metadata <metadata.json> | --lidl <contract.lidl>)\n"
-               "         --backend <qt|cdylib|ui>\n"
+               "         --backend <qt|cdylib|ui|consumer>\n"
                "         [--impl-header <include-name>] [--output-dir <dir>]\n";
         return 1;
     }
@@ -179,8 +187,39 @@ int main(int argc, char* argv[])
     } else if (backend == "cdylib") {
         outs.append({qs(mod.name) + "_cdylib_glue.h", lidlMakeCdylibGlueHeader(mod, multi)});
         outs.append({qs(mod.name) + "_cdylib_glue.cpp", lidlMakeCdylibGlueSource(mod, multi)});
+    } else if (backend == "consumer") {
+        // The Qt-typed CONSUMER wrapper — `<name>_api.{h,cpp}`, the surface a
+        // module calls its dependencies through. Same file names and same
+        // public signatures as the wrapper logos-cpp-generator's
+        // `--api-style qt` emitted; the bodies are a veneer over the lp path.
+        //
+        // --module names the call target (Static) / the files (Bound) and
+        // defaults to the contract's own module name. --class defaults to its
+        // PascalCase, matching the umbrella's `#include "<name>_api.h"`.
+        QString depName = argValue(args, "--module");
+        if (depName.isEmpty()) depName = qs(mod.name);
+        QString cls = argValue(args, "--class");
+        if (cls.isEmpty()) cls = lidlToPascalCase(depName);
+        const QString bindArg = argValue(args, "--bind");
+        if (!bindArg.isEmpty() && bindArg != "static" && bindArg != "bound") {
+            err << "Unknown --bind: " << bindArg << " (expected static|bound)\n";
+            return 2;
+        }
+        const QtConsumerBind bindMode =
+            (bindArg == "bound") ? QtConsumerBind::Bound : QtConsumerBind::Static;
+
+        QString recErr;
+        if (!lidlCheckRecords(mod, &recErr)) {
+            err << recErr << "\n";
+            return 4;
+        }
+
+        const QString headerRel = depName + "_api.h";
+        outs.append({headerRel, lidlMakeQtConsumerHeader(mod, depName, cls, bindMode)});
+        outs.append({depName + "_api.cpp",
+                     lidlMakeQtConsumerSource(mod, depName, cls, headerRel, bindMode)});
     } else {
-        err << "Unknown --backend: " << backend << " (expected qt|cdylib|ui)\n";
+        err << "Unknown --backend: " << backend << " (expected qt|cdylib|ui|consumer)\n";
         return 2;
     }
 

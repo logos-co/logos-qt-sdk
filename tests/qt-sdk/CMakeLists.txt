@@ -35,6 +35,10 @@ add_executable(qt_sdk_tests
     test_async_calls.cpp
     test_provider_dispatch.cpp
     test_std_string_overloads.cpp
+    # The Qt <-> canonical-JSON edge the generated Qt consumer wrapper is built
+    # from (logos_qt_wire.h). One round-trip per surface type, so the generator
+    # can emit one pair of calls everywhere instead of a table per direction.
+    test_qt_wire.cpp
     fixtures/sample_provider.cpp
     ${GENERATED_DISPATCH}
 )
