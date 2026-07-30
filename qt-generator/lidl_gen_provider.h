@@ -28,12 +28,4 @@ QString lidlMakeEventsSource(const ModuleDecl& module,
                               const QString& implClass,
                               const QString& implHeader);
 
-// Full pipeline: parse .lidl, generate provider glue + dispatch + metadata
-// Returns 0 on success, non-zero on error
-int lidlGenerateProviderGlue(const QString& lidlPath,
-                              const QString& implClass,
-                              const QString& implHeader,
-                              const QString& outputDir,
-                              QTextStream& out, QTextStream& err);
-
 #endif // LIDL_GEN_PROVIDER_H
