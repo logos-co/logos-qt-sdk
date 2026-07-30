@@ -19,6 +19,9 @@ add_custom_command(
 
 add_executable(qt_sdk_tests
     test_main.cpp
+    # Argument decoding for a Qt-typed provider — moved here with the decoder
+    # itself, which logos-protocol hosted but never used.
+    test_qt_arg_decode.cpp
     test_logos_result.cpp
     test_logos_mock_setup.cpp
     test_logos_api_client_mock.cpp

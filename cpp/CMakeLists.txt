@@ -43,6 +43,8 @@ set(QT_SDK_SOURCES
     logos_provider_object.h
     qt_provider_object.cpp
     qt_provider_object.h
+    logos_qt_arg_decode.cpp
+    logos_qt_arg_decode.h
 )
 
 add_library(logos_qt_sdk STATIC ${QT_SDK_SOURCES})
@@ -101,6 +103,7 @@ install(FILES
     logos_provider_object.h
     qt_provider_object.h
     logos_ui_plugin_context.h
+    logos_qt_arg_decode.h
     DESTINATION include
 )
 
