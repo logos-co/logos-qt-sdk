@@ -138,6 +138,19 @@ public:
     ~LogosAPI();
 
     /**
+     * @brief The name of the module this LogosAPI belongs to.
+     *
+     * Every outbound call already carries it (LogosAPIClient's `origin`), it
+     * was just never readable from the outside. Generated consumer wrappers
+     * need it: a wrapper that reaches the transport through the lp C ABI must
+     * name its origin at client-creation time, and the only handle it is given
+     * is this object. Reading it here keeps the wrapper's constructor
+     * signature — `(LogosAPI*)` / `(LogosAPI*, const QString&)` — unchanged,
+     * so no call site moves.
+     */
+    QString moduleName() const { return m_module_name; }
+
+    /**
      * @brief Get the client provider instance
      * @return LogosAPIProvider* Pointer to the provider
      */

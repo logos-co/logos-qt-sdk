@@ -29,6 +29,7 @@ add_executable(logos-qt-generator
     lidl_gen_provider.cpp
     lidl_gen_cdylib_glue.cpp
     lidl_gen_ui.cpp
+    lidl_gen_qt_consumer.cpp
     ${LIDL_FRONTEND_DIR}/impl_header_parser.cpp
     ${LIDL_FRONTEND_DIR}/lidl_emit_common.cpp
 )

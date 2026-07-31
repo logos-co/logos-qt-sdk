@@ -42,6 +42,10 @@ add_executable(qt_sdk_tests
     # typed-array cases the logoscore CLI cannot express as arguments.
     test_provider_arg_validation.cpp
     test_std_string_overloads.cpp
+    # The Qt <-> canonical-JSON edge the generated Qt consumer wrapper is built
+    # from (logos_qt_wire.h). One round-trip per surface type, so the generator
+    # can emit one pair of calls everywhere instead of a table per direction.
+    test_qt_wire.cpp
     fixtures/sample_provider.cpp
     ${GENERATED_DISPATCH}
 )
