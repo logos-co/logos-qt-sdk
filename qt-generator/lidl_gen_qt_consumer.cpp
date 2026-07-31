@@ -252,17 +252,6 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
 
     s << "\nprivate:\n";
     s << "    LogosAPI* m_api;\n";
-    // Nothing CALLS m_client any more — the emit side (trigger /
-    // setEventSource / eventSource) that was its only user is gone, because it
-    // had no caller anywhere in the workspace. It is kept solely for the
-    // side effect of its eager acquisition in the constructor:
-    // `api->getClient(...)` is what mints this consumer's Qt-side capability
-    // token, and token exchange is fire-once per process and never re-exchanged.
-    // Dropping it would flip qtCap yes->no on top of the token delta this
-    // veneer already carries, and a rejected call returns a bare QVariant() —
-    // undetectable at the call site. Retire it deliberately, on its own, with a
-    // soak; not as a side effect of deleting dead code.
-    s << "    LogosAPIClient* m_client;\n";
     s << "    QString m_moduleName;\n";
     // Non-owning: the bridge is process-lifetime and keyed by (origin, target),
     // so this wrapper stays a cheap copyable handle and a subscription taken
@@ -325,15 +314,18 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         }
     }
 
-    // Constructor. `m_client` is still acquired eagerly (unchanged behaviour —
-    // getClient is cached); `m_bridge` is the lp seam for everything else.
+    // Constructor. Everything goes through m_bridge. There is deliberately no
+    // eager api->getClient() here: it built a LogosAPIClient nothing called,
+    // and constructing one opens a transport to the target AND one to
+    // capability_module. It mints no token — token exchange is lazy, in
+    // LogosAPIClient::mintAndCacheToken on first invoke.
     if (bind == QtConsumerBind::Bound) {
         s << className << "::" << className << "(LogosAPI* api, const QString& moduleName)\n";
-        s << "    : m_api(api), m_client(api->getClient(moduleName)), m_moduleName(moduleName),\n";
+        s << "    : m_api(api), m_moduleName(moduleName),\n";
         s << "      m_bridge(logos::qt::LpBridge::forTarget(api, moduleName)) {}\n\n";
     } else {
         s << className << "::" << className << "(LogosAPI* api)\n";
-        s << "    : m_api(api), m_client(api->getClient(\"" << moduleName << "\")),\n";
+        s << "    : m_api(api),\n";
         s << "      m_moduleName(QStringLiteral(\"" << moduleName << "\")),\n";
         s << "      m_bridge(logos::qt::LpBridge::forTarget(api, QStringLiteral(\""
           << moduleName << "\"))) {}\n\n";
