@@ -1,12 +1,8 @@
 #include "lidl_gen_provider.h"
 #include "lidl_emit_common.h"
 
-#include <QFile>
-#include <QDir>
-#include <QFileInfo>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QTextStream>
 
 // ---------------------------------------------------------------------------
@@ -627,102 +623,4 @@ QString lidlMakeEventsSource(const ModuleDecl& module,
     }
 
     return c;
-}
-
-// ---------------------------------------------------------------------------
-// Full pipeline (from .lidl file)
-// ---------------------------------------------------------------------------
-
-int lidlGenerateProviderGlue(const QString& lidlPath,
-                              const QString& implClass,
-                              const QString& implHeader,
-                              const QString& outputDir,
-                              QTextStream& out, QTextStream& err)
-{
-    QFileInfo fi(lidlPath);
-    if (!fi.exists()) {
-        err << "LIDL file does not exist: " << lidlPath << "\n";
-        return 2;
-    }
-    QFile file(fi.canonicalFilePath().isEmpty() ? fi.absoluteFilePath() : fi.canonicalFilePath());
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        err << "Failed to open LIDL file: " << lidlPath << "\n";
-        return 3;
-    }
-    QString source = QString::fromUtf8(file.readAll());
-    file.close();
-
-    LidlParseResult pr = lidlParse(source);
-    if (pr.hasError()) {
-        err << lidlPath << ":" << pr.errorLine << ":" << pr.errorColumn
-            << ": " << pr.error << "\n";
-        return 4;
-    }
-
-    LidlValidationResult vr = lidlValidate(pr.module);
-    if (vr.hasErrors()) {
-        for (const std::string& e : vr.errors)
-            err << lidlPath << ": " << e << "\n";
-        return 5;
-    }
-
-    const ModuleDecl& mod = pr.module;
-    QString genDirPath = outputDir.isEmpty()
-        ? QDir::current().filePath("generated")
-        : outputDir;
-    QDir().mkpath(genDirPath);
-
-    QString glueHeaderAbs = QDir(genDirPath).filePath(qs(mod.name) + "_qt_glue.h");
-    {
-        QFile f(glueHeaderAbs);
-        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-            err << "Failed to write glue header: " << glueHeaderAbs << "\n";
-            return 6;
-        }
-        f.write(lidlMakeProviderHeader(mod, implClass, implHeader).toUtf8());
-    }
-
-    QString dispatchAbs = QDir(genDirPath).filePath(qs(mod.name) + "_dispatch.cpp");
-    {
-        QFile f(dispatchAbs);
-        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-            err << "Failed to write dispatch source: " << dispatchAbs << "\n";
-            return 7;
-        }
-        f.write(lidlMakeProviderDispatch(mod).toUtf8());
-    }
-
-    out << "Generated: " << glueHeaderAbs << "\n";
-    out << "Generated: " << dispatchAbs << "\n";
-
-    // Events bodies + LIDL sidecar: emitted whenever the module declares
-    // any events. The sidecar gets shipped in the dep's headers-* output
-    // by buildPlugin.nix's installPhase so consumer-side codegen can
-    // discover events without reintrospecting the .dylib.
-    if (!mod.events.empty()) {
-        QString eventsAbs = QDir(genDirPath).filePath(qs(mod.name) + "_events.cpp");
-        {
-            QFile f(eventsAbs);
-            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-                err << "Failed to write events source: " << eventsAbs << "\n";
-                return 8;
-            }
-            f.write(lidlMakeEventsSource(mod, implClass, implHeader).toUtf8());
-        }
-        out << "Generated: " << eventsAbs << "\n";
-
-        QString lidlAbs = QDir(genDirPath).filePath(qs(mod.name) + ".lidl");
-        {
-            QFile f(lidlAbs);
-            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-                err << "Failed to write LIDL sidecar: " << lidlAbs << "\n";
-                return 9;
-            }
-            f.write(lidlSerialize(mod).toUtf8());
-        }
-        out << "Generated: " << lidlAbs << "\n";
-    }
-
-    out.flush();
-    return 0;
 }
