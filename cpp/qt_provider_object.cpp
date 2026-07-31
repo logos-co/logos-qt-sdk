@@ -3,6 +3,7 @@
 #include "logos_api.h"
 #include "token_manager.h"
 #include "logos_types.h"
+#include "logos_qt_arg_decode.h"
 #include <QDebug>
 #include <QMetaObject>
 #include <QMetaMethod>
@@ -62,13 +63,31 @@ namespace {
         std::function<void(const void*)> deleter;
     };
 
+    // Every `new T(...)` below is a copy-construction from a value that is
+    // ALREADY a T, and every one of them uses parentheses deliberately.
+    //
+    // With braces, `new QVariantList{arg.toList()}` is list-initialization of a
+    // QList<QVariant> from a single QVariantList — and because QVariantList is
+    // implicitly convertible to QVariant, QList's initializer_list<QVariant>
+    // constructor is also viable. Which one wins is exactly the question CWG
+    // 2137 covers, and the compilers answer it differently: Clang picks the
+    // copy constructor, GCC picks the initializer-list one and WRAPS the value,
+    // so a two-element [1,2] reached the method body as [[1,2]], size 1. That
+    // is why this only ever failed on Linux CI.
+    //
+    // Parentheses cannot select an initializer-list constructor, so they mean
+    // the same thing on both compilers. QVariantList was the only type here the
+    // divergence could reach — QStringList and QVariantMap are safe only
+    // because QString and std::pair are not constructible from their own
+    // container — which is precisely why the rule is applied uniformly rather
+    // than to the one case that bit.
     auto toScopedQArgs(const QVariantList& args)
     {
         auto scopedArgs = std::vector<ScopedQArg>{};
         for (const auto& arg : args) {
             switch (arg.typeId()) {
                 case QMetaType::Int: {
-                    auto value = new int{arg.toInt()};
+                    auto value = new int(arg.toInt());
                     scopedArgs.emplace_back(
                         Q_ARG(int, *value),
                         [](const void* data) { delete static_cast<const int*>(data); }
@@ -76,7 +95,7 @@ namespace {
                     break;
                 }
                 case QMetaType::LongLong: {
-                    auto value = new qlonglong{arg.toLongLong()};
+                    auto value = new qlonglong(arg.toLongLong());
                     scopedArgs.emplace_back(
                         Q_ARG(qlonglong, *value),
                         [](const void* data) { delete static_cast<const qlonglong*>(data); }
@@ -84,7 +103,7 @@ namespace {
                     break;
                 }
                 case QMetaType::ULongLong: {
-                    auto value = new qulonglong{arg.toULongLong()};
+                    auto value = new qulonglong(arg.toULongLong());
                     scopedArgs.emplace_back(
                         Q_ARG(qulonglong, *value),
                         [](const void* data) { delete static_cast<const qulonglong*>(data); }
@@ -96,7 +115,7 @@ namespace {
                 // case such an arg fell to the QString default below, stringified
                 // to "" and failed the typed invokeMethod → an EMPTY list arrived.
                 case QMetaType::QVariantList: {
-                    auto value = new QVariantList{arg.toList()};
+                    auto value = new QVariantList(arg.toList());
                     scopedArgs.emplace_back(
                         Q_ARG(QVariantList, *value),
                         [](const void* data) { delete static_cast<const QVariantList*>(data); }
@@ -104,7 +123,7 @@ namespace {
                     break;
                 }
                 case QMetaType::QVariantMap: {
-                    auto value = new QVariantMap{arg.toMap()};
+                    auto value = new QVariantMap(arg.toMap());
                     scopedArgs.emplace_back(
                         Q_ARG(QVariantMap, *value),
                         [](const void* data) { delete static_cast<const QVariantMap*>(data); }
@@ -112,7 +131,7 @@ namespace {
                     break;
                 }
                 case QMetaType::QStringList: {
-                    auto value = new QStringList{arg.toStringList()};
+                    auto value = new QStringList(arg.toStringList());
                     scopedArgs.emplace_back(
                         Q_ARG(QStringList, *value),
                         [](const void* data) { delete static_cast<const QStringList*>(data); }
@@ -120,7 +139,7 @@ namespace {
                     break;
                 }
                 case QMetaType::QByteArray: {
-                    auto value = new QByteArray{arg.toByteArray()};
+                    auto value = new QByteArray(arg.toByteArray());
                     scopedArgs.emplace_back(
                         Q_ARG(QByteArray, *value),
                         [](const void* data) { delete static_cast<const QByteArray*>(data); }
@@ -128,7 +147,7 @@ namespace {
                     break;
                 }
                 case QMetaType::QUrl: {
-                    auto value = new QUrl{arg.toUrl()};
+                    auto value = new QUrl(arg.toUrl());
                     scopedArgs.emplace_back(
                         Q_ARG(QUrl, *value),
                         [](const void* data) { delete static_cast<const QUrl*>(data); }
@@ -136,7 +155,7 @@ namespace {
                     break;
                 }
                 case QMetaType::Bool: {
-                    auto value = new bool{arg.toBool()};
+                    auto value = new bool(arg.toBool());
                     scopedArgs.emplace_back(
                         Q_ARG(bool, *value),
                         [](const void* data) { delete static_cast<const bool*>(data); }
@@ -144,7 +163,7 @@ namespace {
                     break;
                 }
                 case QMetaType::Double: {
-                    auto value = new double{arg.toDouble()};
+                    auto value = new double(arg.toDouble());
                     scopedArgs.emplace_back(
                         Q_ARG(double, *value),
                         [](const void* data) { delete static_cast<const double*>(data); }
@@ -152,7 +171,7 @@ namespace {
                     break;
                 }
                 case QMetaType::Float: {
-                    auto value = new float{arg.toFloat()};
+                    auto value = new float(arg.toFloat());
                     scopedArgs.emplace_back(
                         Q_ARG(float, *value),
                         [](const void* data) { delete static_cast<const float*>(data); }
@@ -161,7 +180,7 @@ namespace {
                 }
                 case QMetaType::QString:
                 default: {
-                    auto value = new QString{arg.toString()};
+                    auto value = new QString(arg.toString());
                     scopedArgs.emplace_back(
                         Q_ARG(QString, *value),
                         [](const void* data) { delete static_cast<const QString*>(data); }
@@ -345,10 +364,40 @@ QVariant QtProviderObject::callMethod(const QString& methodName, const QVariantL
     QMetaMethod method = metaObject->method(methodIndex);
     QMetaType returnType = method.returnMetaType();
 
-    // Coerce args to the types the method actually declares.
+    // Decode args against the types the method actually declares.
+    //
+    // This used to be a bare QVariant::convert(paramType), which COERCES: an
+    // argument the declared type cannot represent silently became one it can
+    // (echoInt(3.7) ran the body with 4; echoBool("hello") with true;
+    // stringLength(42) with "42"), so the author's own precondition checks
+    // never saw the value the caller sent. logos::qtArgDecode routes the value
+    // through the canonical codec instead — the same rule the cdylib dispatch,
+    // the Rust provider and the plain wire apply — and a mismatch becomes the
+    // canonical {"code":"dispatch_failed", ...} answer rather than a plausible
+    // wrong value.
+    //
+    // A type the codec has no rule for (QUrl, an enum, a pointer) reports
+    // Unchecked and keeps the old conversion verbatim: inventing a rule for it
+    // here would reject arguments that work today.
     QVariantList coercedArgs = args;
     for (int i = 0; i < method.parameterCount() && i < coercedArgs.size(); ++i) {
         QMetaType paramType = method.parameterMetaType(i);
+
+        QVariant decoded;
+        std::string reason;
+        const logos::QtArgVerdict verdict = logos::qtArgDecode(
+            coercedArgs[i], paramType, "arg" + std::to_string(i), decoded, reason);
+
+        if (verdict == logos::QtArgVerdict::Rejected) {
+            const QString message = QString::fromStdString(reason);
+            qWarning() << "[LogosProviderObject] QtProviderObject: rejected"
+                       << methodName << "-" << message;
+            return logos::dispatchFailedVariant(providerName(), message);
+        }
+        if (verdict == logos::QtArgVerdict::Ok) {
+            coercedArgs[i] = decoded;
+            continue;
+        }
         if (coercedArgs[i].metaType() != paramType) {
             QVariant converted = coercedArgs[i];
             if (converted.convert(paramType)) {

@@ -1,12 +1,8 @@
 #include "lidl_gen_provider.h"
 #include "lidl_emit_common.h"
 
-#include <QFile>
-#include <QDir>
-#include <QFileInfo>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QTextStream>
 
 // ---------------------------------------------------------------------------
@@ -61,20 +57,53 @@ static QString stdReturnToQt(const TypeExpr& te, const QString& varName)
     return varName;
 }
 
+// The std spelling of a LIDL primitive, for checking the ELEMENTS of an array
+// whose Qt spelling (QVariantList) has erased them. Empty = no rule.
+static QString lidlPrimitiveStdType(const TypeExpr& te)
+{
+    if (te.kind != TypeExpr::Primitive) return QString();
+    if (te.name == "tstr")    return "std::string";
+    if (te.name == "bstr")    return "std::vector<uint8_t>";
+    if (te.name == "int")     return "int64_t";
+    if (te.name == "uint")    return "uint64_t";
+    if (te.name == "float64") return "double";
+    if (te.name == "bool")    return "bool";
+    return QString();
+}
+
+// Incoming argument -> the declared type.
+//
+// This used to be the Qt coercions (`.toInt()`, `.toBool()`, `.toList()`),
+// which is the same defect the header-scanning generator and the QMetaObject
+// dispatch had: echoUint(-1) reached the author's body as 18446744073709551615
+// and echoMap(5) as {}, where every non-Qt provider answers
+// {"code":"dispatch_failed"}. The rule is the canonical codec's — see
+// logos-protocol/cpp/logos_qt_arg_decode.h.
+//
+// This backend is not wired into module-builder's autoCodegen yet; it is fixed
+// with the other two so the bug is not waiting for whoever wires it up. Being
+// LIDL-driven it can do strictly MORE than they can: a `[uint]` parameter is
+// just QVariantList in a C++ signature, but the declaration still names the
+// element type, so the elements are checked here.
 static QString variantToQtArg(const TypeExpr& te, int argIdx)
 {
-    QString a = "args.at(" + QString::number(argIdx) + ")";
-    QString qt = lidlTypeToQt(te);
-    if (qt == "QString")     return a + ".toString()";
-    if (qt == "QByteArray")  return a + ".toByteArray()";
-    if (qt == "int")         return a + ".toInt()";
-    if (qt == "double")      return a + ".toDouble()";
-    if (qt == "bool")        return a + ".toBool()";
-    if (qt == "QStringList") return a + ".toStringList()";
-    if (qt == "QVariantList") return a + ".toList()";
-    if (qt == "QVariantMap") return a + ".toMap()";
-    if (qt == "LogosResult") return a + ".value<LogosResult>()";
-    return a;
+    const QString a = "args.at(" + QString::number(argIdx) + ")";
+    const QString path = "arg" + QString::number(argIdx);
+    const QString qt = lidlTypeToQt(te);
+
+    if (qt == "QVariantList" && te.kind == TypeExpr::Array && te.elements.size() == 1) {
+        const QString elem = lidlPrimitiveStdType(te.elements[0]);
+        if (!elem.isEmpty())
+            return "logos::qtArgListOf<" + elem + ">(" + a + ", \"" + path + "\")";
+    }
+
+    static const QSet<QString> codecKnown = {
+        "bool", "int", "qlonglong", "qulonglong", "double", "float",
+        "QString", "QStringList", "QByteArray", "QJsonArray", "QJsonObject",
+        "QVariantList", "QVariantMap", "QVariant", "LogosResult"
+    };
+    if (!codecKnown.contains(qt)) return a;
+    return "logos::qtArgFromVariant<" + qt + ">(" + a + ", \"" + path + "\")";
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +431,7 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
     s << "#include <QVariant>\n";
     s << "#include <QString>\n";
     s << "#include \"logos_types.h\"\n";
+    s << "#include \"logos_qt_arg_decode.h\"\n";
     s << "#include <exception>\n\n";
 
     // --- callMethod ---
@@ -436,6 +466,14 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
         s << "    }\n";
     }
 
+    // An argument the declared type cannot represent is a REJECTED call, not a
+    // failed one — the canonical {"code":"dispatch_failed", ...} object, the
+    // same answer the cdylib dispatch and the Rust provider give.
+    s << "    } catch (const logos::CodecError& e) {\n";
+    s << "        qWarning() << \"" << providerObjectClass
+      << "::callMethod:\" << methodName << \"rejected:\" << e.what();\n";
+    s << "        return logos::dispatchFailedVariant(providerName(), "
+         "QString::fromUtf8(e.what()));\n";
     s << "    } catch (const std::exception& e) {\n";
     s << "        qWarning() << \"" << providerObjectClass
       << "::callMethod:\" << methodName << \"failed:\" << e.what();\n";
@@ -627,102 +665,4 @@ QString lidlMakeEventsSource(const ModuleDecl& module,
     }
 
     return c;
-}
-
-// ---------------------------------------------------------------------------
-// Full pipeline (from .lidl file)
-// ---------------------------------------------------------------------------
-
-int lidlGenerateProviderGlue(const QString& lidlPath,
-                              const QString& implClass,
-                              const QString& implHeader,
-                              const QString& outputDir,
-                              QTextStream& out, QTextStream& err)
-{
-    QFileInfo fi(lidlPath);
-    if (!fi.exists()) {
-        err << "LIDL file does not exist: " << lidlPath << "\n";
-        return 2;
-    }
-    QFile file(fi.canonicalFilePath().isEmpty() ? fi.absoluteFilePath() : fi.canonicalFilePath());
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        err << "Failed to open LIDL file: " << lidlPath << "\n";
-        return 3;
-    }
-    QString source = QString::fromUtf8(file.readAll());
-    file.close();
-
-    LidlParseResult pr = lidlParse(source);
-    if (pr.hasError()) {
-        err << lidlPath << ":" << pr.errorLine << ":" << pr.errorColumn
-            << ": " << pr.error << "\n";
-        return 4;
-    }
-
-    LidlValidationResult vr = lidlValidate(pr.module);
-    if (vr.hasErrors()) {
-        for (const std::string& e : vr.errors)
-            err << lidlPath << ": " << e << "\n";
-        return 5;
-    }
-
-    const ModuleDecl& mod = pr.module;
-    QString genDirPath = outputDir.isEmpty()
-        ? QDir::current().filePath("generated")
-        : outputDir;
-    QDir().mkpath(genDirPath);
-
-    QString glueHeaderAbs = QDir(genDirPath).filePath(qs(mod.name) + "_qt_glue.h");
-    {
-        QFile f(glueHeaderAbs);
-        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-            err << "Failed to write glue header: " << glueHeaderAbs << "\n";
-            return 6;
-        }
-        f.write(lidlMakeProviderHeader(mod, implClass, implHeader).toUtf8());
-    }
-
-    QString dispatchAbs = QDir(genDirPath).filePath(qs(mod.name) + "_dispatch.cpp");
-    {
-        QFile f(dispatchAbs);
-        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-            err << "Failed to write dispatch source: " << dispatchAbs << "\n";
-            return 7;
-        }
-        f.write(lidlMakeProviderDispatch(mod).toUtf8());
-    }
-
-    out << "Generated: " << glueHeaderAbs << "\n";
-    out << "Generated: " << dispatchAbs << "\n";
-
-    // Events bodies + LIDL sidecar: emitted whenever the module declares
-    // any events. The sidecar gets shipped in the dep's headers-* output
-    // by buildPlugin.nix's installPhase so consumer-side codegen can
-    // discover events without reintrospecting the .dylib.
-    if (!mod.events.empty()) {
-        QString eventsAbs = QDir(genDirPath).filePath(qs(mod.name) + "_events.cpp");
-        {
-            QFile f(eventsAbs);
-            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-                err << "Failed to write events source: " << eventsAbs << "\n";
-                return 8;
-            }
-            f.write(lidlMakeEventsSource(mod, implClass, implHeader).toUtf8());
-        }
-        out << "Generated: " << eventsAbs << "\n";
-
-        QString lidlAbs = QDir(genDirPath).filePath(qs(mod.name) + ".lidl");
-        {
-            QFile f(lidlAbs);
-            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-                err << "Failed to write LIDL sidecar: " << lidlAbs << "\n";
-                return 9;
-            }
-            f.write(lidlSerialize(mod).toUtf8());
-        }
-        out << "Generated: " << lidlAbs << "\n";
-    }
-
-    out.flush();
-    return 0;
 }

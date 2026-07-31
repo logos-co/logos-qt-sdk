@@ -19,6 +19,9 @@ add_custom_command(
 
 add_executable(qt_sdk_tests
     test_main.cpp
+    # Argument decoding for a Qt-typed provider — moved here with the decoder
+    # itself, which logos-protocol hosted but never used.
+    test_qt_arg_decode.cpp
     test_logos_result.cpp
     test_logos_mock_setup.cpp
     test_logos_api_client_mock.cpp
@@ -34,6 +37,10 @@ add_executable(qt_sdk_tests
     test_event_system.cpp
     test_async_calls.cpp
     test_provider_dispatch.cpp
+    # Provider-side ARGUMENT decoding (registry entry Q1) for both Qt provider
+    # sites — the generated dispatch and the QMetaObject one. Carries the four
+    # typed-array cases the logoscore CLI cannot express as arguments.
+    test_provider_arg_validation.cpp
     test_std_string_overloads.cpp
     # The Qt <-> canonical-JSON edge the generated Qt consumer wrapper is built
     # from (logos_qt_wire.h). One round-trip per surface type, so the generator
