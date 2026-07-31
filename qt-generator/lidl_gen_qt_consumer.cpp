@@ -224,19 +224,6 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
     s << "    using EventCallback = std::function<void(const QVariantList&)>;\n\n";
     s << "    bool on(const QString& eventName, RawEventCallback callback);\n";
     s << "    bool on(const QString& eventName, EventCallback callback);\n";
-    s << "    void setEventSource(LogosObject* source);\n";
-    s << "    LogosObject* eventSource() const;\n";
-    s << "    void trigger(const QString& eventName);\n";
-    s << "    void trigger(const QString& eventName, const QVariantList& data);\n";
-    s << "    template<typename... Args>\n";
-    s << "    void trigger(const QString& eventName, Args&&... args) {\n";
-    s << "        trigger(eventName, packVariantList(std::forward<Args>(args)...));\n";
-    s << "    }\n";
-    s << "    void trigger(const QString& eventName, LogosObject* source, const QVariantList& data);\n";
-    s << "    template<typename... Args>\n";
-    s << "    void trigger(const QString& eventName, LogosObject* source, Args&&... args) {\n";
-    s << "        trigger(eventName, source, packVariantList(std::forward<Args>(args)...));\n";
-    s << "    }\n\n";
 
     for (const EventDecl& ev : module.events) {
         if (ev.name.empty()) continue;
@@ -264,22 +251,19 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
     }
 
     s << "\nprivate:\n";
-    s << "    template<typename... Args>\n";
-    s << "    static QVariantList packVariantList(Args&&... args) {\n";
-    s << "        QVariantList list;\n";
-    s << "        list.reserve(sizeof...(Args));\n";
-    s << "        using Expander = int[];\n";
-    s << "        (void)Expander{0, (list.append(QVariant::fromValue(std::forward<Args>(args))), 0)...};\n";
-    s << "        return list;\n";
-    s << "    }\n";
     s << "    LogosAPI* m_api;\n";
-    // Kept for the EMIT side only (trigger / setEventSource): lp_* has no
-    // client-side emit-on-behalf-of, so those three members of the surface
-    // cannot be veneered and stay on the Qt client. Everything that CONSUMES —
-    // every method, every event subscription — goes through m_bridge.
+    // Nothing CALLS m_client any more — the emit side (trigger /
+    // setEventSource / eventSource) that was its only user is gone, because it
+    // had no caller anywhere in the workspace. It is kept solely for the
+    // side effect of its eager acquisition in the constructor:
+    // `api->getClient(...)` is what mints this consumer's Qt-side capability
+    // token, and token exchange is fire-once per process and never re-exchanged.
+    // Dropping it would flip qtCap yes->no on top of the token delta this
+    // veneer already carries, and a rejected call returns a bare QVariant() —
+    // undetectable at the call site. Retire it deliberately, on its own, with a
+    // soak; not as a side effect of deleting dead code.
     s << "    LogosAPIClient* m_client;\n";
     s << "    QString m_moduleName;\n";
-    s << "    LogosObject* m_eventSource = nullptr;\n";
     // Non-owning: the bridge is process-lifetime and keyed by (origin, target),
     // so this wrapper stays a cheap copyable handle and a subscription taken
     // out on a `bind_x(...)` TEMPORARY keeps delivering — the same lifetime the
@@ -377,33 +361,6 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     s << "    return on(eventName, [callback](const QString&, const QVariantList& data) {\n";
     s << "        callback(data);\n";
     s << "    });\n";
-    s << "}\n\n";
-
-    // Emit side — unchanged, and unchangeable: lp_* has no client-side
-    // emit-on-behalf-of (only a provider emits, on a handle a consumer wrapper
-    // does not own), so these three keep the Qt client.
-    s << "void " << className << "::setEventSource(LogosObject* source) {\n";
-    s << "    m_eventSource = source;\n";
-    s << "}\n\n";
-    s << "LogosObject* " << className << "::eventSource() const {\n";
-    s << "    return m_eventSource;\n";
-    s << "}\n\n";
-    s << "void " << className << "::trigger(const QString& eventName) {\n";
-    s << "    trigger(eventName, QVariantList{});\n";
-    s << "}\n\n";
-    s << "void " << className << "::trigger(const QString& eventName, const QVariantList& data) {\n";
-    s << "    if (!m_eventSource) {\n";
-    s << "        qWarning() << \"" << className << ": no event source set for trigger\" << eventName;\n";
-    s << "        return;\n";
-    s << "    }\n";
-    s << "    m_client->onEventResponse(m_eventSource, eventName, data);\n";
-    s << "}\n\n";
-    s << "void " << className << "::trigger(const QString& eventName, LogosObject* source, const QVariantList& data) {\n";
-    s << "    if (!source) {\n";
-    s << "        qWarning() << \"" << className << ": cannot trigger\" << eventName << \"with null source\";\n";
-    s << "        return;\n";
-    s << "    }\n";
-    s << "    m_client->onEventResponse(source, eventName, data);\n";
     s << "}\n\n";
 
     // Typed event accessors.
