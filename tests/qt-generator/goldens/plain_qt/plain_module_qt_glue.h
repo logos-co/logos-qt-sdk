@@ -132,13 +132,11 @@ public:
     }
 
     QVariantMap attributes(const QVariantMap& tags) {
-        auto _result = m_impl.attributes(tags);
-        return nlohmannToQVariant(_result).toMap();
+        return m_impl.attributes(tags);
     }
 
     QVariant describe(Point p) {
-        auto _result = m_impl.describe(p);
-        return nlohmannToQVariant(_result).toList();
+        return m_impl.describe(p);
     }
 
     LogosResult fetch(const QString& id) {
