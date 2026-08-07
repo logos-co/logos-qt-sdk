@@ -173,7 +173,7 @@ protected:
 
 private:
     std::unique_ptr<LogosModules> m_logosModules;
-     m_impl;
+    FixtureImpl m_impl;
 };
 
 class PlainModulePlugin : public QObject, public PluginInterface, public LogosProviderPlugin {

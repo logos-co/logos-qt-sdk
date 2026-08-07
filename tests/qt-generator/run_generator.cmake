@@ -23,10 +23,13 @@ file(REMOVE_RECURSE "${OUT_DIR}")
 file(MAKE_DIRECTORY "${OUT_DIR}")
 
 set(_args --lidl "${LIDL}" --backend "${BACKEND}" --output-dir "${OUT_DIR}")
-# The qt backend names the impl header it includes; fixed so the emitted
-# `#include` is stable across machines and therefore diffable.
+# The qt backend names the impl class it wraps and the header it includes. BOTH
+# are required for the emitted header to be syntactically valid: without
+# --impl-class the member declaration comes out as a bare ` m_impl;` with no
+# type. Fixed values so the emitted `#include` and type name are stable across
+# machines and therefore diffable.
 if(BACKEND STREQUAL "qt")
-  list(APPEND _args --impl-header fixture_impl.h)
+  list(APPEND _args --impl-class FixtureImpl --impl-header fixture_impl.h)
 endif()
 
 execute_process(
