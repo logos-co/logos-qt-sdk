@@ -1,0 +1,29 @@
+; The optionality fixture: every position a `?T` may legally appear.
+;
+; NOTE what is absent — there is no `-> ?T` method, because an optional RETURN
+; is refused by design (see refuses_optional_return.lidl and
+; lidlCheckOptionalReturns). This contract is the positive case; that one is
+; the negative.
+module optional_module {
+  version "1.0.0"
+  description "Optional parameters, optional record fields, optional event args."
+
+  type Profile {
+    ; A record carries optionality in TWO equivalent spellings, and they must
+    ; generate identical code. Both appear here on purpose so a backend that
+    ; reads `f.optional` or `f.type.kind` instead of fieldIsOptional() shows up
+    ; as a diff between these two lines.
+    name: tstr
+    ? nickname: tstr
+    handle: ?tstr
+  }
+
+  ; A trailing optional lowers the required arity; a leading one does not,
+  ; because the slot after it is positional and still has to be reachable.
+  method find(id: ?tstr, exact: bool) -> tstr
+  method lookup(id: tstr, limit: ?uint) -> tstr
+  method store(blob: ?bstr) -> bool
+  method save(p: Profile) -> bool
+
+  event changed(label: ?tstr, seq: int)
+}

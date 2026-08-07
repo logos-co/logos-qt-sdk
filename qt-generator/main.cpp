@@ -178,6 +178,11 @@ int main(int argc, char* argv[])
 
     QList<Out> outs;
     if (backend == "qt") {
+        QString typeErr;
+        if (!lidlCheckOptionalReturns(mod, &typeErr)) {
+            err << typeErr << "\n";
+            return 4;
+        }
         outs.append({qs(mod.name) + "_qt_glue.h",
                      lidlMakeProviderHeader(mod, implClass, implHeader)});
         outs.append({qs(mod.name) + "_dispatch.cpp", lidlMakeProviderDispatch(mod)});
@@ -211,6 +216,14 @@ int main(int argc, char* argv[])
         QString recErr;
         if (!lidlCheckRecords(mod, &recErr)) {
             err << recErr << "\n";
+            return 4;
+        }
+        // Same refusal as the provider path: a consumer that could CALL an
+        // optional-returning method would have no way to tell the empty answer
+        // from a failed call either.
+        QString optErr;
+        if (!lidlCheckOptionalReturns(mod, &optErr)) {
+            err << optErr << "\n";
             return 4;
         }
 

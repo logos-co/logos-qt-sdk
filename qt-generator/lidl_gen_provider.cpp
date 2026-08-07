@@ -12,11 +12,82 @@
 
 
 // ---------------------------------------------------------------------------
+// Optionality
+// ---------------------------------------------------------------------------
+
+// A usable `?T`. A degenerate Optional carrying no value type (unreachable from
+// the parser, constructible by hand or over the JSON bridge) keeps the untyped
+// fallback rather than pretending to be optional — the same guard the cdylib
+// backend and the Rust backend apply.
+static bool isOptionalSlot(const TypeExpr& te)
+{
+    return te.kind == TypeExpr::Optional && !te.elements.empty();
+}
+
+static bool methodHasOptionalParam(const MethodDecl& md)
+{
+    for (const ParamDecl& p : md.params)
+        if (isOptionalSlot(p.type)) return true;
+    return false;
+}
+
+static bool moduleHasOptionalParam(const ModuleDecl& module)
+{
+    for (const MethodDecl& md : module.methods)
+        if (methodHasOptionalParam(md)) return true;
+    for (const EventDecl& ev : module.events)
+        for (const ParamDecl& p : ev.params)
+            if (isOptionalSlot(p.type)) return true;
+    return false;
+}
+
+// The number of leading argument slots a caller MUST supply: one past the last
+// required parameter. A trailing `?T` lowers it; an optional in the middle does
+// not, because the slot after it is positional and still has to be reachable.
+static int minRequiredArgs(const MethodDecl& md)
+{
+    int minArgs = 0;
+    for (int i = 0; i < md.params.size(); ++i)
+        if (!isOptionalSlot(md.params[i].type)) minArgs = i + 1;
+    return minArgs;
+}
+
+bool lidlCheckOptionalReturns(const ModuleDecl& module, QString* error)
+{
+    for (const MethodDecl& md : module.methods) {
+        if (md.returnType.kind != TypeExpr::Optional) continue;
+        if (error) {
+            *error = QStringLiteral(
+                "%1: an optional RETURN (`-> ?T`) is not supported. An empty `?T` is "
+                "spelled JSON null on the wire, and null is already how this path "
+                "reports a FAILED call (logos_json_convert maps it to an invalid "
+                "QVariant, which core_service reports as METHOD_FAILED) — so \"found "
+                "nothing\" would be indistinguishable from \"the call failed\" for every "
+                "non-Rust caller. Take `?T` as a PARAMETER, or return a `result`.")
+                .arg(qs(md.name));
+        }
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Conversion helpers: Qt type ↔ std type
 // ---------------------------------------------------------------------------
 
 static QString qtParamToStd(const TypeExpr& te, const QString& paramName)
 {
+    // `?T` reaches the author as std::optional<T>. The Qt surface is an untyped
+    // QVariant (lidlTypeToQt is documented to lose the value type there), so the
+    // value is decoded through the CANONICAL codec rather than a parallel one:
+    // an absent or null slot becomes an empty optional, and anything else is
+    // decoded as T by the SAME decoder a required T would get. Optionality
+    // widens the domain; it does not switch type checking off.
+    if (isOptionalSlot(te)) {
+        return "logos::fromJson<" + lidlTypeToStd(te) + ">(logos::qvariantToNlohmann("
+             + paramName + "), \"" + paramName + "\")";
+    }
+
     if (!lidlIsStdConvertible(te))
         return paramName;
 
@@ -44,8 +115,13 @@ static QString stdReturnToQt(const TypeExpr& te, const QString& varName)
     if (te.kind == TypeExpr::Primitive) {
         if (te.name == "tstr")    return "QString::fromStdString(" + varName + ")";
         if (te.name == "bstr")    return "QByteArray(reinterpret_cast<const char*>(" + varName + ".data()), static_cast<int>(" + varName + ".size()))";
-        if (te.name == "int")     return "static_cast<int>(" + varName + ")";
-        if (te.name == "uint")    return "static_cast<int>(" + varName + ")";
+        // 64-bit, not int: `int` is int64_t and `uint` is uint64_t on the std
+        // side, so casting to a 32-bit int silently truncated every value past
+        // 2^31 on the way back out to Qt — the same class of defect as the
+        // parse_u64-as-u128 wrap, and invisible until a large id or a wei
+        // amount crossed it.
+        if (te.name == "int")     return "static_cast<qlonglong>(" + varName + ")";
+        if (te.name == "uint")    return "static_cast<qulonglong>(" + varName + ")";
         return varName;
     }
     if (te.kind == TypeExpr::Array && te.elements.size() == 1) {
@@ -87,8 +163,23 @@ static QString lidlPrimitiveStdType(const TypeExpr& te)
 // element type, so the elements are checked here.
 static QString variantToQtArg(const TypeExpr& te, int argIdx)
 {
-    const QString a = "args.at(" + QString::number(argIdx) + ")";
+    // `.value(i)`, never `.at(i)`: `at` on a QList is unchecked, so a caller
+    // sending fewer arguments than the contract declares was reading past the
+    // end. `value` returns a default-constructed (invalid) QVariant instead,
+    // which the codec below rejects with a named path — and which an OPTIONAL
+    // slot reads as its empty inhabitant. The arity gate in callMethod catches
+    // the required case first with a better message; this is the backstop that
+    // makes an out-of-range slot impossible rather than merely unlikely.
+    const QString a = "args.value(" + QString::number(argIdx) + ")";
     const QString path = "arg" + QString::number(argIdx);
+
+    // `?T` is untyped on the Qt surface (QVariant), so the slot is handed over
+    // verbatim and decoded once, in qtParamToStd, by the canonical codec.
+    // Decoding it here as well would type-check the value twice and, worse,
+    // reject an absent slot before the optional could absorb it.
+    if (isOptionalSlot(te))
+        return a;
+
     const QString qt = lidlTypeToQt(te);
 
     if (qt == "QVariantList" && te.kind == TypeExpr::Array && te.elements.size() == 1) {
@@ -195,6 +286,15 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
         s << "    return result;\n";
         s << "}\n";
         s << "} // anonymous namespace\n\n";
+    }
+
+    // `?T` decodes through the canonical codec, which needs the codec itself and
+    // the QVariant->json bridge. Emitted only when the contract actually has an
+    // optional slot, so a contract without one keeps byte-identical output.
+    if (moduleHasOptionalParam(module)) {
+        s << "#include <optional>\n";
+        s << "#include \"logos_codec.h\"\n";
+        s << "#include \"logos_json_convert.h\"\n\n";
     }
 
     // Emit nlohmannToQVariant helper if any method returns LogosMap / LogosList / StdLogosResult
@@ -447,6 +547,17 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
         QString qtRet = lidlTypeToQt(md.returnType);
         s << "    if (methodName == \"" << md.name << "\") {\n";
 
+        // Too few arguments is a REJECTED call, named and counted, rather than
+        // an out-of-range read. A trailing `?T` lowers this bound, which is the
+        // whole point of an optional slot: the caller may simply stop early.
+        const int minArgs = minRequiredArgs(md);
+        if (minArgs > 0) {
+            s << "        if (args.size() < " << minArgs << ")\n";
+            s << "            return logos::dispatchFailedVariant(providerName(),\n";
+            s << "                QStringLiteral(\"" << md.name << ": expected at least "
+              << minArgs << " argument(s), got \") + QString::number(args.size()));\n";
+        }
+
         if (qtRet == "void") {
             s << "        " << md.name << "(";
             for (int i = 0; i < md.params.size(); ++i) {
@@ -515,9 +626,16 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
         if (!md.params.empty()) {
             s << "        QJsonArray params;\n";
             for (int i = 0; i < md.params.size(); ++i) {
+                // `optional` is ADDITIVE and emitted only when true, so an
+                // interface with no optionals is byte-identical to what this
+                // generator produced before. A reader that does not know the key
+                // sees exactly today's object.
+                const QString opt = isOptionalSlot(md.params[i].type)
+                                        ? QStringLiteral(", {\"optional\", true}")
+                                        : QString();
                 s << "        params.append(QJsonObject{{\"type\", QStringLiteral(\""
                   << lidlTypeToQt(md.params[i].type) << "\")}, {\"name\", QStringLiteral(\""
-                  << md.params[i].name << "\")}});\n";
+                  << md.params[i].name << "\")}" << opt << "});\n";
             }
             s << "        obj[\"parameters\"] = params;\n";
         }
@@ -590,6 +708,18 @@ QString lidlMakeProviderDispatch(const ModuleDecl& module)
 // std-typed parameter. Mirrors the type-mapping table in lidlTypeToStd.
 static QString stdParamToQVariantExpr(const TypeExpr& te, const QString& pn)
 {
+    // `?T` — the author emits std::optional<T>, which is NOT a registered
+    // metatype, so the QVariant::fromValue fallback at the bottom would put an
+    // opaque blob on the wire. An empty optional is the invalid QVariant (the
+    // same empty inhabitant the parameter direction reads back); a present one
+    // marshals exactly as a required T would, so a subscriber cannot tell a
+    // filled optional slot from a required one.
+    if (isOptionalSlot(te)) {
+        return "(" + pn + ".has_value() ? "
+             + stdParamToQVariantExpr(optionalValueType(te), "(*" + pn + ")")
+             + " : QVariant())";
+    }
+
     if (te.kind == TypeExpr::Primitive) {
         if (te.name == "tstr")
             return "QVariant(QString::fromStdString(" + pn + "))";

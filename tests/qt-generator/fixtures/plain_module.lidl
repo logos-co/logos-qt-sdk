@@ -1,0 +1,36 @@
+; BACK-COMPAT CONTROL. Deliberately contains NO optional anywhere.
+;
+; Every generator output for this contract must be byte-identical to what the
+; pre-optionality generator produced — that is the whole point of the goldens
+; beside it. If a diff shows up here, an "improvement" leaked into a path that
+; was supposed to be untouched.
+;
+; It covers one of every non-optional shape the Qt backends special-case:
+; scalars, bstr, typed arrays, records, arrays-of-records, maps, `any`,
+; `result`, void, and an event.
+module plain_module {
+  version "1.0.0"
+  description "Back-compat control: no optionals, one of every other shape."
+
+  type Point {
+    x: float64
+    y: float64
+  }
+
+  method echo_text(s: tstr) -> tstr
+  method echo_bytes(b: bstr) -> bstr
+  method echo_int(n: int) -> int
+  method echo_uint(n: uint) -> uint
+  method echo_bool(b: bool) -> bool
+  method echo_float(f: float64) -> float64
+  method echo_strings(v: [tstr]) -> [tstr]
+  method echo_ints(v: [int]) -> [int]
+  method translate(p: Point, dx: float64) -> Point
+  method bounds(points: [Point]) -> Point
+  method attributes(tags: {tstr: any}) -> {tstr: any}
+  method describe(p: Point) -> any
+  method fetch(id: tstr) -> result
+  method reset() -> void
+
+  event moved(from: Point, to: Point)
+}

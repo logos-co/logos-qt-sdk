@@ -1,0 +1,13 @@
+; TRIPWIRE FIXTURE. Generating from this MUST fail, on both the qt and the
+; consumer backend, with a message naming the reason.
+;
+; It goes green — i.e. the generator starts accepting it — only when someone
+; teaches the host path to tell an empty optional apart from a failed call.
+; Read lidlCheckOptionalReturns before deleting this file: the fix is to NARROW
+; the null-means-failure rule to methods whose published metadata declares an
+; optional return, never to delete that rule (deleting it silently converts
+; every pre-existing failure into a success).
+module refusing_module {
+  version "1.0.0"
+  method lookup(id: tstr) -> ?tstr
+}

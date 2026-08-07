@@ -15,3 +15,4 @@ include(GoogleTest)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../cpp ${CMAKE_CURRENT_BINARY_DIR}/logos_qt_sdk)
 
 add_subdirectory(qt-sdk)
+add_subdirectory(qt-generator)
