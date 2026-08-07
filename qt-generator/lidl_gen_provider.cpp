@@ -297,11 +297,18 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
         s << "#include \"logos_json_convert.h\"\n\n";
     }
 
-    // Emit nlohmannToQVariant helper if any method returns LogosMap / LogosList / StdLogosResult
+    // Emit the nlohmannToQVariant helper only for a `result` return.
+    //
+    // It used to be emitted for the jsonReturn shapes too, back when they were
+    // (wrongly) routed through it — on this backend the impl hands those back as
+    // Qt types already, so they never needed a json conversion.
     bool needsNlohmannHelper = false;
     bool needsResultHelper = false;
     for (const MethodDecl& md : module.methods) {
-        if (md.jsonReturn)   needsNlohmannHelper = true;
+        // NOT jsonReturn: those shapes come back from the impl as Qt types
+        // already and no longer touch the helper. `result` is the one that
+        // genuinely does — StdLogosResult::value IS an nlohmann::json, and
+        // stdResultToQt converts it.
         if (md.resultReturn) { needsNlohmannHelper = true; needsResultHelper = true; }
     }
     if (needsNlohmannHelper) {
@@ -373,17 +380,25 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
             }
             s << ");\n";
         } else if (md.jsonReturn) {
-            // LogosMap / LogosList: impl returns nlohmann::json, convert to Qt type
-            s << "        auto _result = m_impl." << md.name << "(";
+            // `any`, `{tstr: T}` and `[any]` — the three shapes the LIDL parser
+            // marks jsonReturn.
+            //
+            // The impl returns these ALREADY AS QT TYPES: lidlTypeToStd maps
+            // `any` to QVariant, a map to QVariantMap and `[any]` to
+            // QVariantList. So there is nothing to convert, and the conversion
+            // that used to be here was wrong twice over — it fed a Qt value to
+            // nlohmannToQVariant, which takes an nlohmann::json, and it then
+            // forced everything that was not a map through `.toList()`, which
+            // would coerce an object or a scalar `any` into a list.
+            //
+            // (The name is inherited from the cdylib path, where an impl really
+            // does hand back LogosMap/LogosList. This backend's impls never do.)
+            s << "        return m_impl." << md.name << "(";
             for (int i = 0; i < md.params.size(); ++i) {
                 s << qtParamToStd(md.params[i].type, qs(md.params[i].name));
                 if (i + 1 < md.params.size()) s << ", ";
             }
             s << ");\n";
-            if (qtRet == "QVariantMap")
-                s << "        return nlohmannToQVariant(_result).toMap();\n";
-            else
-                s << "        return nlohmannToQVariant(_result).toList();\n";
         } else if (md.resultReturn) {
             // StdLogosResult: impl returns pure-C++ result, convert to Qt LogosResult
             s << "        auto _result = m_impl." << md.name << "(";
