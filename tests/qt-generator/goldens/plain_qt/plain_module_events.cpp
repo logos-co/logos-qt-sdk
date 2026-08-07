@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-void ::moved(QVariant from, QVariant to) {
+void FixtureImpl::moved(QVariant from, QVariant to) {
     QVariantList _args{QVariant::fromValue(from), QVariant::fromValue(to)};
     this->emitEventImpl_("moved", &_args);
 }
