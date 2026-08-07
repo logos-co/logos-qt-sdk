@@ -15,6 +15,7 @@
 class LogosTransportHost;
 class LogosObject;
 class ModuleProxy;
+class ModuleHandshakeProxy;
 class LogosProviderObject;
 class QtProviderObject;
 
@@ -88,12 +89,20 @@ public slots:
 
 private:
     bool publishProvider(const QString& name, LogosProviderObject* provider);
+    // Publishes the token-only handshake surface (logos::handshakeObjectName)
+    // before the module's initializer runs, so capability_module can deliver a
+    // token to a module that is still starting up. Best-effort: a transport that
+    // declines it simply leaves capability_module falling back to the business
+    // object, which is the pre-existing behaviour.
+    void publishHandshake(const QString& name, LogosProviderObject* provider);
 
     // One host per configured transport. Single-entry vector for back-compat.
     std::vector<std::unique_ptr<LogosTransportHost>> m_transports;
     QString m_registryUrl;
     QMap<QString, QString> m_tokens;
     ModuleProxy* m_moduleProxy;
+    ModuleHandshakeProxy* m_handshakeProxy = nullptr;
+    QString m_registeredHandshakeName;
     QtProviderObject* m_qtProviderObject;
     QString m_registeredObjectName;
     // Appended (never inserted mid-list): keeps every pre-existing member's
