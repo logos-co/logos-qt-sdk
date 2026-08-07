@@ -1,5 +1,9 @@
 # Builds and runs the test suite
-{ pkgs, common, src, protocolLib, cppGenerator }:
+#
+# qtGenerator is a nativeBuildInput because tests/qt-generator drives the
+# INSTALLED binary rather than linking the generator's internals — that binary
+# is what module-builder actually invokes, so it is what the goldens must pin.
+{ pkgs, common, src, protocolLib, cppGenerator, qtGenerator }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-tests";
@@ -7,7 +11,7 @@ pkgs.stdenv.mkDerivation {
 
   inherit src;
 
-  nativeBuildInputs = common.nativeBuildInputs ++ [ cppGenerator ];
+  nativeBuildInputs = common.nativeBuildInputs ++ [ cppGenerator qtGenerator ];
   buildInputs = common.buildInputs ++ [ pkgs.gtest protocolLib ];
   cmakeFlags = common.cmakeFlags;
 

@@ -46,7 +46,9 @@
             logos-lidl = lidlPkg;
           };
           include = import ./nix/include.nix { inherit pkgs common src; };
-          tests = import ./nix/tests.nix { inherit pkgs common src protocolLib cppGenerator; };
+          tests = import ./nix/tests.nix {
+            inherit pkgs common src protocolLib cppGenerator qtGenerator;
+          };
 
           qtSdk = pkgs.symlinkJoin {
             name = "logos-qt-sdk";
@@ -69,7 +71,14 @@
         let
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
-          tests = import ./nix/tests.nix { inherit pkgs common src protocolLib cppGenerator; };
+          qtGenerator = import ./nix/qt-generator.nix {
+            inherit pkgs src;
+            cppGeneratorBin = cppGenerator;
+            logos-lidl = lidlPkg;
+          };
+          tests = import ./nix/tests.nix {
+            inherit pkgs common src protocolLib cppGenerator qtGenerator;
+          };
         in
         {
           inherit tests;
