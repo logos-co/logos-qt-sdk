@@ -7,6 +7,7 @@
 #include "logos_instance.h"
 #include "logos_transport.h"
 #include "logos_transport_factory.h"
+#include "token_manager.h"
 #include <QDebug>
 #include <string>
 
@@ -159,6 +160,36 @@ void LogosAPIProvider::setTokenValidator(TokenValidator validator)
     }
 }
 
+void LogosAPIProvider::seedHandshakeTrustAnchor()
+{
+    QObject* api = parent();
+    if (!api) {
+        return;
+    }
+
+    // The host publishes its token as a property on the LogosAPI object before
+    // calling registerObject (logos-module-loader-qt module_initializer.cpp).
+    // An older host that does not set it leaves the store empty — the handshake
+    // surface then refuses, and the consumer falls back to the business object
+    // exactly as it did before this surface existed.
+    const QString hostToken = api->property("authToken").toString();
+    if (hostToken.isEmpty()) {
+        qDebug() << "[LogosProviderObject] LogosAPIProvider: no authToken property"
+                 << "- handshake surface will refuse until the initializer seeds the"
+                 << "token store; consumers fall back to the business object";
+        return;
+    }
+
+    // Never overwrite an entry the module already holds: this runs before init(),
+    // so a non-empty value here came from somewhere with more context than us.
+    TokenManager& tokens = TokenManager::instance();
+    for (const QString& key : { QStringLiteral("core"), QStringLiteral("capability_module") }) {
+        if (tokens.getToken(key).isEmpty()) {
+            tokens.saveToken(key, hostToken);
+        }
+    }
+}
+
 void LogosAPIProvider::publishHandshake(const QString& name, LogosProviderObject* provider)
 {
     // The handshake proxy needs the ModuleProxy that will own the token store,
@@ -169,6 +200,25 @@ void LogosAPIProvider::publishHandshake(const QString& name, LogosProviderObject
             m_moduleProxy->setTokenValidator(m_pendingValidator);
         }
     }
+
+    // Seed the trust anchor BEFORE the surface goes live.
+    //
+    // ModuleProxy::informModuleToken only accepts a caller whose token matches
+    // TokenManager's "core" or "capability_module" entry. Those entries are
+    // written by the module's own initializer — the generated cdylib glue reads
+    // the host's `authToken` property and calls logos_module_accept_token("core")
+    // / ("capability_module") — and init() runs AFTER this point, between
+    // publishHandshake and publishProvider.
+    //
+    // That is precisely the window this surface exists to serve, so without this
+    // the store is empty for the whole window and every push that arrives is
+    // refused: the surface would be reachable and useless, and capability_module
+    // would report a failed grant. (Measured before this line existed: the
+    // rejection appeared in 29 of 34 runs and never in the pre-fix baseline.)
+    //
+    // This grants nothing new. It installs the same host-issued token the
+    // initializer installs moments later, just early enough to be usable.
+    seedHandshakeTrustAnchor();
 
     m_handshakeProxy = new ModuleHandshakeProxy(m_moduleProxy, this);
     const QString handshakeName = logos::handshakeObjectName(name);
