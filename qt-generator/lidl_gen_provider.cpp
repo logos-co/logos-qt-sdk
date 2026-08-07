@@ -297,7 +297,11 @@ QString lidlMakeProviderHeader(const ModuleDecl& module,
         s << "#include \"logos_json_convert.h\"\n\n";
     }
 
-    // Emit nlohmannToQVariant helper if any method returns LogosMap / LogosList / StdLogosResult
+    // Emit the nlohmannToQVariant helper only for a `result` return.
+    //
+    // It used to be emitted for the jsonReturn shapes too, back when they were
+    // (wrongly) routed through it — on this backend the impl hands those back as
+    // Qt types already, so they never needed a json conversion.
     bool needsNlohmannHelper = false;
     bool needsResultHelper = false;
     for (const MethodDecl& md : module.methods) {
