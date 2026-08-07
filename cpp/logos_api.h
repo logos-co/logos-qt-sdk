@@ -2,6 +2,7 @@
 #define LOGOS_API_H
 
 #include "logos_mode.h"
+#include "logos_shared_api.h"
 #include "logos_transport_config.h"
 #include "logos_types.h"
 
@@ -84,8 +85,16 @@ inline size_t qHash(const LogosAPIClientCacheKey& k, size_t seed = 0) noexcept
  * @brief LogosAPI provides a unified interface to the Logos SDK
  * 
  * This class initializes and keeps instances of the client provider and token manager.
+ *
+ * LOGOS_SHARED_API because this is the object handed across the DLL boundary:
+ * the host constructs a LogosAPI inside liblogos_core and passes the pointer to
+ * the UI plugin through PluginInterface::logosAPI. Its constructor caches
+ * `&TokenManager::instance()`, so on PE a plugin that links its own copy of
+ * logos_api.cpp.obj caches a DIFFERENT singleton than the one the host wrote
+ * the token into. Importing instead of re-linking is what makes the two agree.
+ * See logos_shared_api.h in logos-protocol.
  */
-class LogosAPI : public QObject
+class LOGOS_SHARED_API LogosAPI : public QObject
 {
     Q_OBJECT
 
