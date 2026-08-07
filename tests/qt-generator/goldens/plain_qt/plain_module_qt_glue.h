@@ -95,12 +95,12 @@ public:
 
     qlonglong echo_int(qlonglong n) {
         auto _result = m_impl.echo_int(static_cast<int64_t>(n));
-        return static_cast<int>(_result);
+        return static_cast<qlonglong>(_result);
     }
 
     qulonglong echo_uint(qulonglong n) {
         auto _result = m_impl.echo_uint(static_cast<uint64_t>(n));
-        return static_cast<int>(_result);
+        return static_cast<qulonglong>(_result);
     }
 
     bool echo_bool(bool b) {

@@ -20,5 +20,16 @@ logos-qt-generator --lidl fixtures/plain_module.lidl --backend consumer \
 
 ## History
 
-Captured from the generator at `cde7d42`, before optionality. Any diff against
-these is a change to a path that carries no optionals at all.
+Captured first from the generator at `cde7d42` (pre-optionality), then rebased
+once onto the optional-parameters change. That rebase was accepted only after
+classifying **every** differing line; the complete set was:
+
+| change | why it touches a contract with no optionals |
+|---|---|
+| an arity gate (`args.size() < N` -> `dispatch_failed`) | the optionality mechanism itself — a trailing `?T` must be omittable, so the dispatch can no longer assume every declared slot was sent |
+| `args.at(i)` -> `args.value(i)` | same mechanism, and it closes a pre-existing unchecked `QList::at` read past the end when a caller sent too few arguments |
+| `static_cast<int>` -> `static_cast<qlonglong>` / `<qulonglong>` on `int`/`uint` returns | an unrelated pre-existing bug fixed in passing: `int` is `int64_t` and `uint` is `uint64_t`, so the 32-bit cast silently truncated every value past 2^31 |
+
+Nothing else differed. The **consumer** backend was byte-identical across that
+rebase and has never been regenerated — its optionality changes fire only for an
+optional field, so a contract without one is untouched by construction.

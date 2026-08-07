@@ -11,6 +11,12 @@ QString lidlTypeToStd(const TypeExpr& te);
 // True if this type can be represented as a pure C++ std type (no Qt)
 bool lidlIsStdConvertible(const TypeExpr& te);
 
+// Reject what the Qt provider path cannot express. Today that is exactly one
+// thing: an optional RETURN, whose empty inhabitant is indistinguishable on this
+// path from a failed call. Fills *error with the reason. Mirrors
+// lidlCheckRecords' shape so main.cpp treats both the same way.
+bool lidlCheckOptionalReturns(const ModuleDecl& module, QString* error);
+
 // Generate the Qt glue header (plugin class + provider object with Q_INVOKABLE wrappers)
 QString lidlMakeProviderHeader(const ModuleDecl& module,
                                const QString& implClass,

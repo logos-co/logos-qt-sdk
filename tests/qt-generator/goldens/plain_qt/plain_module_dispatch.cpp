@@ -12,43 +12,82 @@ QVariant PlainModuleProviderObject::callMethod(const QString& methodName, const 
 {
     try {
     if (methodName == "echo_text") {
-        return QVariant::fromValue(echo_text(logos::qtArgFromVariant<QString>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("echo_text: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(echo_text(logos::qtArgFromVariant<QString>(args.value(0), "arg0")));
     }
     if (methodName == "echo_bytes") {
-        return QVariant::fromValue(echo_bytes(logos::qtArgFromVariant<QByteArray>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("echo_bytes: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(echo_bytes(logos::qtArgFromVariant<QByteArray>(args.value(0), "arg0")));
     }
     if (methodName == "echo_int") {
-        return QVariant::fromValue(echo_int(logos::qtArgFromVariant<qlonglong>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("echo_int: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(echo_int(logos::qtArgFromVariant<qlonglong>(args.value(0), "arg0")));
     }
     if (methodName == "echo_uint") {
-        return QVariant::fromValue(echo_uint(logos::qtArgFromVariant<qulonglong>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("echo_uint: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(echo_uint(logos::qtArgFromVariant<qulonglong>(args.value(0), "arg0")));
     }
     if (methodName == "echo_bool") {
-        return QVariant::fromValue(echo_bool(logos::qtArgFromVariant<bool>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("echo_bool: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(echo_bool(logos::qtArgFromVariant<bool>(args.value(0), "arg0")));
     }
     if (methodName == "echo_float") {
-        return QVariant::fromValue(echo_float(logos::qtArgFromVariant<double>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("echo_float: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(echo_float(logos::qtArgFromVariant<double>(args.value(0), "arg0")));
     }
     if (methodName == "echo_strings") {
-        return QVariant::fromValue(echo_strings(logos::qtArgFromVariant<QStringList>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("echo_strings: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(echo_strings(logos::qtArgFromVariant<QStringList>(args.value(0), "arg0")));
     }
     if (methodName == "echo_ints") {
-        return QVariant::fromValue(echo_ints(logos::qtArgListOf<int64_t>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("echo_ints: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(echo_ints(logos::qtArgListOf<int64_t>(args.value(0), "arg0")));
     }
     if (methodName == "translate") {
-        return QVariant::fromValue(translate(args.at(0), logos::qtArgFromVariant<double>(args.at(1), "arg1")));
+        if (args.size() < 2)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("translate: expected at least 2 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(translate(args.value(0), logos::qtArgFromVariant<double>(args.value(1), "arg1")));
     }
     if (methodName == "bounds") {
-        return QVariant::fromValue(bounds(args.at(0)));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("bounds: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(bounds(args.value(0)));
     }
     if (methodName == "attributes") {
-        return QVariant::fromValue(attributes(logos::qtArgFromVariant<QVariantMap>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("attributes: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(attributes(logos::qtArgFromVariant<QVariantMap>(args.value(0), "arg0")));
     }
     if (methodName == "describe") {
-        return QVariant::fromValue(describe(args.at(0)));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("describe: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(describe(args.value(0)));
     }
     if (methodName == "fetch") {
-        return QVariant::fromValue(fetch(logos::qtArgFromVariant<QString>(args.at(0), "arg0")));
+        if (args.size() < 1)
+            return logos::dispatchFailedVariant(providerName(),
+                QStringLiteral("fetch: expected at least 1 argument(s), got ") + QString::number(args.size()));
+        return QVariant::fromValue(fetch(logos::qtArgFromVariant<QString>(args.value(0), "arg0")));
     }
     if (methodName == "reset") {
         reset();

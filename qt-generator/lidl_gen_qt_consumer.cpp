@@ -97,6 +97,20 @@ QString declParam(const ModuleDecl& m, const TypeExpr& te, const QString& name)
     return byRef(m, te, t) ? "const " + t + "& " + name : t + " " + name;
 }
 
+// The surface spelling of a record FIELD, honouring BOTH optionality spellings.
+//
+// `? name: T` and `name: ?T` mean the same thing and must produce identical
+// code; only fieldIsOptional() reconciles them, so a backend that reads
+// `f.optional` or `f.type.kind` directly is the drift this exists to prevent.
+// An optional field is QVariant on the Qt surface for the same reason `?T` is
+// everywhere else here: Qt has no optional template, and QVariant already has
+// exactly one empty inhabitant to carry the empty state.
+QString fieldSurfaceType(const ModuleDecl& m, const FieldDecl& f, const QString& qual)
+{
+    if (fieldIsOptional(f)) return "QVariant";
+    return surfaceType(m, f.type, qual, /*paramPosition=*/true);
+}
+
 // ── the two conversion spellings ────────────────────────────────────────────
 
 QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr)
@@ -208,7 +222,7 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
         for (const TypeDecl& t : module.types) {
             s << "    struct " << qs(t.name) << " {\n";
             for (const FieldDecl& f : t.fields)
-                s << "        " << surfaceType(module, f.type, QString(), true)
+                s << "        " << fieldSurfaceType(module, f, QString())
                   << " " << qs(f.name) << "{};\n";
             s << "    };\n";
         }
@@ -294,9 +308,22 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             s << "static nlohmann::json " << recToWireFn(qs(t.name))
               << "(const " << qual << qs(t.name) << "& v) {\n";
             s << "    nlohmann::json __j = nlohmann::json::object();\n";
-            for (const FieldDecl& f : t.fields)
-                s << "    __j[\"" << qs(f.name) << "\"] = "
-                  << toWire(module, f.type, "v." + qs(f.name)) << ";\n";
+            for (const FieldDecl& f : t.fields) {
+                const QString fv = "v." + qs(f.name);
+                if (fieldIsOptional(f)) {
+                    // An EMPTY optional omits its key rather than writing null.
+                    // Both spell "absent" to a reader (Codec<std::optional<T>>
+                    // maps a missing key and an explicit null alike), but
+                    // omitting is what the C++ and Rust encoders already do, and
+                    // sending the key back means a round-tripped record is
+                    // byte-identical to the one that was received.
+                    s << "    if (" << fv << ".isValid()) __j[\"" << qs(f.name) << "\"] = "
+                      << toWire(module, f.type, fv) << ";\n";
+                } else {
+                    s << "    __j[\"" << qs(f.name) << "\"] = "
+                      << toWire(module, f.type, fv) << ";\n";
+                }
+            }
             s << "    return __j;\n";
             s << "}\n\n";
 
@@ -306,9 +333,18 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
               << "(const nlohmann::json& w) {\n";
             s << "    " << qual << qs(t.name) << " __out;\n";
             s << "    if (!w.is_object()) return __out;\n";
-            for (const FieldDecl& f : t.fields)
+            for (const FieldDecl& f : t.fields) {
+                const QString src = "w.at(\"" + qs(f.name) + "\")";
+                // An optional field decodes to a bare QVariant: null becomes the
+                // invalid QVariant, which IS its empty inhabitant, so an absent
+                // key and a null key land on the same value — and the surrounding
+                // `contains` guard keeps a missing key at the default.
+                const QString expr = fieldIsOptional(f)
+                                         ? "logos::qt::fromWire<QVariant>(" + src + ")"
+                                         : fromWire(module, f.type, src, qual);
                 s << "    if (w.contains(\"" << qs(f.name) << "\")) __out." << qs(f.name)
-                  << " = " << fromWire(module, f.type, "w.at(\"" + qs(f.name) + "\")", qual) << ";\n";
+                  << " = " << expr << ";\n";
+            }
             s << "    return __out;\n";
             s << "}\n\n";
         }
