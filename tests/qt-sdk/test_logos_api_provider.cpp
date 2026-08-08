@@ -186,3 +186,95 @@ TEST_F(ProviderTokenValidatorTest, ValidatorSetAfterRegisterIsApplied)
     EXPECT_EQ(callThroughProxy("named-tok").toString(), "dispatched");
     EXPECT_TRUE(logos::isUnauthorizedSentinel(callThroughProxy("garbage-tok")));
 }
+
+// ── the trust anchor must exist BEFORE the handshake surface goes live ───────
+//
+// The handshake surface is published inside registerObject, ahead of the
+// module's initializer. ModuleProxy::informModuleToken only accepts a caller
+// matching TokenManager's "core"/"capability_module" entry, and for a cdylib
+// module those entries are written BY that initializer (the generated glue
+// forwards the host's authToken through logos_module_accept_token). So without
+// seedHandshakeTrustAnchor the store is empty for the whole window the surface
+// exists to cover, and every push that arrives is refused by construction --
+// the surface is reachable and useless.
+//
+// That is not hypothetical: measured against the real wallet-ui app bundle on
+// Linux before the seeding existed, "ModuleProxy: rejecting informModuleToken"
+// appeared in 29 of 34 runs and in 0 of 34 on the pre-surface baseline.
+//
+// These cases pin the publisher's half of that contract. The gate's half lives
+// in logos-protocol (HandshakeSurfaceTest.PushIsRefusedWhileTheTrustAnchorIsUnseeded),
+// and the transport's half in HandshakeTransportTest.
+class ProviderTrustAnchorTest : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        m_mock = new LogosMockSetup();
+        m_prevCore = TokenManager::instance().getToken(QStringLiteral("core"));
+        m_prevCap  = TokenManager::instance().getToken(QStringLiteral("capability_module"));
+        TokenManager::instance().removeToken(QStringLiteral("core"));
+        TokenManager::instance().removeToken(QStringLiteral("capability_module"));
+    }
+    void TearDown() override
+    {
+        auto restore = [](const QString& k, const QString& v) {
+            if (v.isEmpty()) TokenManager::instance().removeToken(k);
+            else TokenManager::instance().saveToken(k, v);
+        };
+        restore(QStringLiteral("core"), m_prevCore);
+        restore(QStringLiteral("capability_module"), m_prevCap);
+        delete m_mock;
+    }
+    LogosMockSetup* m_mock = nullptr;
+    QString m_prevCore, m_prevCap;
+};
+
+TEST_F(ProviderTrustAnchorTest, RegisterSeedsTheAnchorFromTheHostAuthToken)
+{
+    LogosAPI api("anchor_module");
+    // The host publishes its token as a property before calling registerObject
+    // (logos-module-loader-qt module_initializer.cpp).
+    api.setProperty("authToken", QStringLiteral("host-tok"));
+
+    auto* prov = new RegistrationTestProvider();
+    ASSERT_TRUE(api.getProvider()->registerObject("anchor_module", prov));
+
+    EXPECT_EQ(TokenManager::instance().getToken(QStringLiteral("core")),
+              QStringLiteral("host-tok"))
+        << "the handshake surface went live without a usable trust anchor, so "
+           "every push arriving during init would be refused";
+    EXPECT_EQ(TokenManager::instance().getToken(QStringLiteral("capability_module")),
+              QStringLiteral("host-tok"));
+}
+
+TEST_F(ProviderTrustAnchorTest, AnExistingAnchorIsNeverOverwritten)
+{
+    TokenManager::instance().saveToken(QStringLiteral("core"), QStringLiteral("already-set"));
+
+    LogosAPI api("anchor_keep_module");
+    api.setProperty("authToken", QStringLiteral("host-tok"));
+
+    auto* prov = new RegistrationTestProvider();
+    ASSERT_TRUE(api.getProvider()->registerObject("anchor_keep_module", prov));
+
+    EXPECT_EQ(TokenManager::instance().getToken(QStringLiteral("core")),
+              QStringLiteral("already-set"))
+        << "seeding must not clobber a value installed with more context";
+    // The key that WAS empty is still seeded.
+    EXPECT_EQ(TokenManager::instance().getToken(QStringLiteral("capability_module")),
+              QStringLiteral("host-tok"));
+}
+
+TEST_F(ProviderTrustAnchorTest, NoAuthTokenPropertyIsANoOpRatherThanAnEmptyAnchor)
+{
+    // An older host that publishes no authToken property. Seeding must not
+    // install an empty entry -- ModuleProxy treats a non-empty stored token as
+    // a live trust anchor, so an empty one would be a silent auth hole.
+    LogosAPI api("anchor_none_module");
+
+    auto* prov = new RegistrationTestProvider();
+    ASSERT_TRUE(api.getProvider()->registerObject("anchor_none_module", prov));
+
+    EXPECT_TRUE(TokenManager::instance().getToken(QStringLiteral("core")).isEmpty());
+    EXPECT_TRUE(TokenManager::instance().getToken(QStringLiteral("capability_module")).isEmpty());
+}
