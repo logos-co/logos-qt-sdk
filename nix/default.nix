@@ -9,8 +9,8 @@
     pkgs.cmake
     pkgs.ninja
     pkgs.pkg-config
-    pkgs.qt6.wrapQtAppsNoGuiHook
-  ];
+  ]
+  ++ pkgs.lib.optional (!pkgs.stdenv.hostPlatform.isWindows) pkgs.qt6.wrapQtAppsNoGuiHook;
 
   # Qt is this SDK's whole point — it is the layer where Qt types live.
   buildInputs = [
@@ -30,10 +30,14 @@
     pkgs.nlohmann_json
   ];
 
-  cmakeFlags = [ "-GNinja" ];
+  cmakeFlags = [ "-GNinja" ]
+    # Qt's host TOOLS (repc, moc, qmltyperegistrar) live in separate packages
+    # that must RUN on the build machine; logos-nix's Windows overlay exposes
+    # the flags pointing Qt at them. Absent -- so empty -- on native builds.
+    ++ (pkgs.logosQtCrossCmakeFlags or [ ]);
 
   meta = with pkgs.lib; {
     description = "Logos Qt SDK - Qt developer layer over logos-protocol";
-    platforms = platforms.unix;
+    platforms = platforms.unix ++ platforms.windows;
   };
 }

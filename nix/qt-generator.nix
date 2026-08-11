@@ -7,6 +7,10 @@
 
 pkgs.stdenv.mkDerivation {
   pname = "logos-qt-generator";
+  # qtbase\'s setup hook errors in qtPreHook unless a wrapper hook ran or
+  # this is set; the wrapper hooks are absent on Windows (they cannot even
+  # evaluate for a mingw host) and would skip a PE anyway.
+  dontWrapQtApps = true;
   version = "0.1.0";
   inherit src;
   # The unpacked store name varies (path: flakes get hash-prefixed
