@@ -210,6 +210,7 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
     s << "#include \"logos_api.h\"\n";
     s << "#include \"logos_api_client.h\"\n";
     s << "#include \"logos_call_error.h\"\n";
+    s << "#include \"logos_async_result.h\"\n";
     s << "#include \"logos_object.h\"\n\n";
     // Forward declaration only — see the include comment above.
     s << "namespace logos { namespace qt { class LpBridge; } }\n\n";
@@ -253,8 +254,14 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
         QStringList params;
         for (const ParamDecl& p : mtd.params) params << declParam(module, p.type, qs(p.name));
 
+        // Both trailing and both defaulted, so every existing call site — up to
+        // and including the ones that already pass `&err` positionally — is
+        // unchanged. The deadline is APPENDED rather than sitting next to the
+        // value args (where the async overloads carry it) for exactly that
+        // reason; the seam has taken one since `logos::qt::invoke` grew its
+        // timeoutMs parameter, and the body simply defaulted it.
         QStringList sync = params;
-        sync << "logos::CallError* err = nullptr";
+        sync << "logos::CallError* err = nullptr" << "Timeout timeout = Timeout()";
         s << "    " << ret << " " << qs(mtd.name) << "(" << sync.join(", ") << ");\n";
 
         const QString cb = (ret == "void") ? QStringLiteral("std::function<void()>")
@@ -262,6 +269,22 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
         QStringList async = params;
         async << cb + " callback" << "Timeout timeout = Timeout()";
         s << "    void " << qs(mtd.name) << "Async(" << async.join(", ") << ");\n";
+
+        // The result-carrying async. `<name>Async` above hands the callback a
+        // bare value, so a failed call is INDISTINGUISHABLE from a provider
+        // that legitimately returned 0 / "" / false — the ambiguity the sync
+        // `CallError*` exists to resolve. This one delivers both.
+        //
+        // A DISTINCT NAME, not an overload of `<name>Async`: two overloads
+        // differing only in std::function<void(T)> vs
+        // std::function<void(AsyncResult<T>)> are ambiguous for a generic
+        // lambda (`[](auto v){...}` is invocable with either), which would
+        // break existing call sites. `void` needs no special case — it is
+        // AsyncResult<void>, the error-only specialisation.
+        QStringList asyncResult = params;
+        asyncResult << "std::function<void(logos::AsyncResult<" + ret + ">)> callback"
+                    << "Timeout timeout = Timeout()";
+        s << "    void " << qs(mtd.name) << "AsyncResult(" << asyncResult.join(", ") << ");\n";
     }
 
     s << "\nprivate:\n";
@@ -293,6 +316,41 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     s << "#include \"logos_qt_lp_bridge.h\"\n\n";
 
     const QString qual = className + "::";
+
+    // A provider that RAN and rejected well-formed arguments answers the
+    // canonical {code, message, origin} envelope as its RESULT, not as a
+    // transport error — logos_protocol.h states so explicitly, and says the
+    // generated wrappers are what fold it. Without this the rejection reaches
+    // the return conversion, which erases it: a rejected `[uint]` call comes
+    // back as [] — the whole list, not a bad element — with error.ok() true.
+    //
+    // The QVariant twin of this lives in the cpp-generator's Qt emitter; this
+    // is the nlohmann one, because the lp seam speaks JSON. Kept emitted (not
+    // shared through a header) so both emitters stay independent, exactly as
+    // the QVariant one already is.
+    //
+    // The match is EXACT — those three fields, all strings, and that code —
+    // for the same reason logos_rpc_status.h's isUnauthorizedSentinel is
+    // exact: an `any` or map return carrying user data must never false-match.
+    // Only reachable from a method body, so a contract with no methods must not
+    // emit it: an unused function in an anonymous namespace is a
+    // -Wunused-function warning.
+    if (!module.methods.empty()) {
+        s << "namespace {\n\n";
+        s << "bool logosDispatchRejectionJson(const nlohmann::json& v, logos::CallError& out)\n";
+        s << "{\n";
+        s << "    if (!v.is_object() || v.size() != 3) return false;\n";
+        s << "    auto code = v.find(\"code\"), message = v.find(\"message\"), origin = v.find(\"origin\");\n";
+        s << "    if (code == v.end() || message == v.end() || origin == v.end()) return false;\n";
+        s << "    if (!code->is_string() || !message->is_string() || !origin->is_string()) return false;\n";
+        s << "    if (code->get<std::string>() != \"dispatch_failed\") return false;\n";
+        s << "    out.code = code->get<std::string>();\n";
+        s << "    out.message = message->get<std::string>();\n";
+        s << "    out.origin = origin->get<std::string>();\n";
+        s << "    return true;\n";
+        s << "}\n\n";
+        s << "} // namespace\n\n";
+    }
 
     // Record <-> canonical JSON. Declared up front so records can reference
     // each other (and themselves, through a list field) in any order.
@@ -434,15 +492,20 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
                 s << "    _args.push_back(" << toWire(module, p.type, qs(p.name)) << ");\n";
         };
 
-        // Sync
+        // Sync. The caller's Timeout is threaded into the C ABI's timeout_ms
+        // just as the async paths do.
         {
             QStringList sig = params;
-            sig << "logos::CallError* err";
+            sig << "logos::CallError* err" << "Timeout timeout";
             s << retQual << " " << className << "::" << qs(mtd.name) << "(" << sig.join(", ") << ") {\n";
         }
         emitArgs();
         s << "    logos::CallError _err;\n";
-        s << "    nlohmann::json _r = logos::qt::invoke(m_bridge, \"" << qs(mtd.name) << "\", _args, &_err);\n";
+        s << "    nlohmann::json _r = logos::qt::invoke(m_bridge, \"" << qs(mtd.name)
+          << "\", _args, &_err, timeout.ms);\n";
+        // Fold a provider rejection into the error channel BEFORE the return
+        // table converts it, or the conversion erases it.
+        s << "    if (_err.ok()) logosDispatchRejectionJson(_r, _err);\n";
         s << "    if (err) *err = _err;\n";
         s << "    else if (!_err.ok()) qWarning() << \"" << className << "::" << qs(mtd.name)
           << ": remote call failed:\" << QString::fromStdString(_err.message);\n";
@@ -465,10 +528,47 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         emitArgs();
         s << "    logos::qt::invokeAsync(m_bridge, \"" << qs(mtd.name) << "\", _args,\n";
         s << "        [callback](nlohmann::json _r) {\n";
+        // The value-only callback has nowhere to put an error, so a rejection
+        // is at least made visible in the module log rather than vanishing into
+        // the return conversion below. `<name>AsyncResult` is the surface that
+        // can actually REPORT it.
+        s << "            { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))\n";
+        s << "                  qWarning() << \"" << className << "::" << qs(mtd.name)
+          << "Async: remote call failed:\" << QString::fromStdString(_rej.message); }\n";
         if (retVoid)
             s << "            (void)_r; callback();\n";
         else
             s << "            callback(" << fromWire(module, mtd.returnType, "_r", qual) << ");\n";
+        s << "        }, timeout.ms);\n";
+        s << "}\n\n";
+
+        // Result-carrying async. Same argument encoding and the same return
+        // decoding as the two above — the value it delivers is the one
+        // `<name>Async` would have — and what it adds is the error that
+        // callback has nowhere to put. On failure the value stays
+        // default-constructed and `_res.error` says so.
+        {
+            QStringList sig = params;
+            sig << "std::function<void(logos::AsyncResult<" + ret + ">)> callback"
+                << "Timeout timeout";
+            s << "void " << className << "::" << qs(mtd.name) << "AsyncResult("
+              << sig.join(", ") << ") {\n";
+        }
+        s << "    if (!callback) return;\n";
+        emitArgs();
+        s << "    logos::qt::invokeAsyncResult(m_bridge, \"" << qs(mtd.name) << "\", _args,\n";
+        s << "        [callback](nlohmann::json _r, const logos::CallError& _err) {\n";
+        s << "            logos::AsyncResult<" << ret << "> _res;\n";
+        s << "            _res.error = _err;\n";
+        // This is the surface that can report a rejection, and callers branch
+        // on _res.ok(). Fold before the conversion below, or a rejected call
+        // reports success with a default-constructed value.
+        s << "            if (_res.error.ok()) logosDispatchRejectionJson(_r, _res.error);\n";
+        if (retVoid)
+            s << "            (void)_r;\n";
+        else
+            s << "            _res.value = " << fromWire(module, mtd.returnType, "_r", qual) << ";\n";
+        s << "            callback(_res);\n";
         s << "        }, timeout.ms);\n";
         s << "}\n\n";
     }
