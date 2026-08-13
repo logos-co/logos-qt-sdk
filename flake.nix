@@ -53,6 +53,10 @@
         pkgs = import nixpkgs { inherit system; };
         protocolLib = logos-protocol.packages.${system}.logos-protocol-lib;
         cppGenerator = logos-cpp-sdk.packages.${system}.cpp-generator;
+        # Headers only — the base SDK's include set, needed by the test suite's
+        # single-TU compile check (see nix/tests.nix). Not part of any shipped
+        # package here: this SDK's own sources do not include them.
+        cppSdkInclude = logos-cpp-sdk.packages.${system}.logos-cpp-include;
         lidlPkg = logos-lidl.packages.${system}.logos-lidl;
         qtHost = logos-plugin-qt.packages.${system}.logos-qt-host;
       });
@@ -102,10 +106,15 @@
             # QT_HOST_PATH rather than the target Qt.
             cppGenerator =
               logos-cpp-sdk.packages.${if isWin then windowsBuildSystem else system}.cpp-generator;
+
+            # Headers, so target-typed like every other include set here — but
+            # architecture-independent in practice, since the package installs
+            # sources and nothing else. Only the test suite consumes it.
+            cppSdkInclude = logos-cpp-sdk.packages.${system}.logos-cpp-include;
           });
     in
     {
-      packages = forAllTargets ({ pkgs, protocolLib, cppGenerator, lidlPkg, qtHost, ... }:
+      packages = forAllTargets ({ pkgs, protocolLib, cppGenerator, cppSdkInclude, lidlPkg, qtHost, ... }:
         let
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
@@ -118,7 +127,7 @@
           };
           include = import ./nix/include.nix { inherit pkgs common src; };
           tests = import ./nix/tests.nix {
-            inherit pkgs common src protocolLib cppGenerator qtGenerator qtHost;
+            inherit pkgs common src protocolLib cppGenerator cppSdkInclude qtGenerator qtHost;
           };
 
           qtSdk = pkgs.symlinkJoin {
@@ -144,7 +153,7 @@
         }
       );
 
-      checks = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg, qtHost, ... }:
+      checks = forAllSystems ({ pkgs, protocolLib, cppGenerator, cppSdkInclude, lidlPkg, qtHost, ... }:
         let
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
@@ -154,7 +163,7 @@
             logos-lidl = lidlPkg;
           };
           tests = import ./nix/tests.nix {
-            inherit pkgs common src protocolLib cppGenerator qtGenerator qtHost;
+            inherit pkgs common src protocolLib cppGenerator cppSdkInclude qtGenerator qtHost;
           };
         in
         {

@@ -3,7 +3,14 @@
 # qtGenerator is a nativeBuildInput because tests/qt-generator drives the
 # INSTALLED binary rather than linking the generator's internals — that binary
 # is what module-builder actually invokes, so it is what the goldens must pin.
-{ pkgs, common, src, protocolLib, cppGenerator, qtGenerator, qtHost }:
+#
+# cppSdkInclude is a buildInput (headers only, no library) for one target:
+# tests/qt-generator's single-TU compile check. A generated consumer wrapper
+# includes headers from BOTH layers — logos_api.h / logos_types.h from the Qt
+# host, logos_async_result.h from the base SDK — so without it the suite can
+# generate wrapper text but never hand it to a compiler, which is exactly how a
+# wrapper that does not compile in the umbrella's TU got shipped.
+{ pkgs, common, src, protocolLib, cppGenerator, cppSdkInclude, qtGenerator, qtHost }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-tests";
@@ -12,7 +19,7 @@ pkgs.stdenv.mkDerivation {
   inherit src;
 
   nativeBuildInputs = common.nativeBuildInputs ++ [ cppGenerator qtGenerator ];
-  buildInputs = common.buildInputs ++ [ pkgs.gtest protocolLib qtHost ];
+  buildInputs = common.buildInputs ++ [ pkgs.gtest protocolLib qtHost cppSdkInclude ];
   cmakeFlags = common.cmakeFlags;
 
   dontUseCmakeConfigure = true;

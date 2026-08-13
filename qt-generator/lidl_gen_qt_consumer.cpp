@@ -335,7 +335,24 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     // Only reachable from a method body, so a contract with no methods must not
     // emit it: an unused function in an anonymous namespace is a
     // -Wunused-function warning.
+    //
+    // The include guard is load-bearing, not habit. These wrapper .cpp files are
+    // not compiled on their own — the generated umbrella (logos_sdk.cpp)
+    // `#include`s every one of them, so a module with two dependencies puts two
+    // copies of this function in ONE translation unit. The anonymous namespace
+    // does not save it: all anonymous namespaces in a TU are the SAME namespace,
+    // so the second copy is a redefinition and the build dies in generated code.
+    // (A module with a single dependency compiles fine, which is why this only
+    // shows up on the real multi-dependency consumers.)
+    //
+    // The macro is deliberately distinct from the cpp-generator emitter's
+    // LOGOS_GENERATED_DISPATCH_REJECTION: that one guards the QVariant twin of
+    // this function, and while the two surfaces coexist a single TU can end up
+    // holding one wrapper of each flavour. Sharing the macro would silence the
+    // wrong definition and leave a rejection unfolded.
     if (!module.methods.empty()) {
+        s << "#ifndef LOGOS_GENERATED_DISPATCH_REJECTION_JSON\n";
+        s << "#define LOGOS_GENERATED_DISPATCH_REJECTION_JSON\n\n";
         s << "namespace {\n\n";
         s << "bool logosDispatchRejectionJson(const nlohmann::json& v, logos::CallError& out)\n";
         s << "{\n";
@@ -350,6 +367,7 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "    return true;\n";
         s << "}\n\n";
         s << "} // namespace\n\n";
+        s << "#endif  // LOGOS_GENERATED_DISPATCH_REJECTION_JSON\n\n";
     }
 
     // Record <-> canonical JSON. Declared up front so records can reference

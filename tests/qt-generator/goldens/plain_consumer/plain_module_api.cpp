@@ -4,6 +4,9 @@
 #include <nlohmann/json.hpp>
 #include "logos_qt_lp_bridge.h"
 
+#ifndef LOGOS_GENERATED_DISPATCH_REJECTION_JSON
+#define LOGOS_GENERATED_DISPATCH_REJECTION_JSON
+
 namespace {
 
 bool logosDispatchRejectionJson(const nlohmann::json& v, logos::CallError& out)
@@ -20,6 +23,8 @@ bool logosDispatchRejectionJson(const nlohmann::json& v, logos::CallError& out)
 }
 
 } // namespace
+
+#endif  // LOGOS_GENERATED_DISPATCH_REJECTION_JSON
 
 static nlohmann::json recToWire_Point(const PlainModule::Point& v);
 static PlainModule::Point recFromWire_Point(const nlohmann::json& w);

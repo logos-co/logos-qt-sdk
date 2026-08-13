@@ -53,3 +53,41 @@ _qtgen_test(refuse_return_qt       refuse qt       refuses_optional_return.lidl
             EXPECT_TEXT "optional RETURN")
 _qtgen_test(refuse_return_consumer refuse consumer refuses_optional_return.lidl
             EXPECT_TEXT "optional RETURN")
+
+# --- 4. two consumer wrappers COMPILE in one translation unit -----------------
+#
+# The tests above run the generator and read its text; none of them ever hands
+# the result to a compiler, and none of them generates more than one contract.
+# Both gaps met in the same defect: the umbrella (`logos_sdk.cpp`) `#include`s
+# every dependency's wrapper .cpp, so a two-dependency consumer compiles two
+# wrappers into ONE TU, and the file-scope rejection helper was redefined. See
+# fixtures/umbrella_tu.cpp.
+#
+# A library target rather than a ctest case: there is nothing to run, the claim
+# is that it compiles. It fails the BUILD, which is the earliest and loudest
+# place to fail.
+set(_tu_dir ${CMAKE_CURRENT_BINARY_DIR}/umbrella_tu)
+set(_tu_generated
+    ${_tu_dir}/plain_module_api.cpp    ${_tu_dir}/plain_module_api.h
+    ${_tu_dir}/optional_module_api.cpp ${_tu_dir}/optional_module_api.h)
+
+add_custom_command(
+    OUTPUT ${_tu_generated}
+    COMMAND ${LOGOS_QT_GENERATOR} --lidl ${_fixtures}/plain_module.lidl
+            --backend consumer --module plain_module --output-dir ${_tu_dir}
+    COMMAND ${LOGOS_QT_GENERATOR} --lidl ${_fixtures}/optional_module.lidl
+            --backend consumer --module optional_module --output-dir ${_tu_dir}
+    DEPENDS ${_fixtures}/plain_module.lidl ${_fixtures}/optional_module.lidl
+    COMMENT "Generating two consumer wrappers for the single-TU compile check"
+)
+add_custom_target(qtgen_umbrella_sources DEPENDS ${_tu_generated})
+
+# STATIC and never linked — the wrappers reference the SDK's bridge symbols,
+# which only a real module binary resolves. Compiling is the whole test.
+add_library(qtgen_umbrella_tu STATIC ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/umbrella_tu.cpp)
+add_dependencies(qtgen_umbrella_tu qtgen_umbrella_sources)
+target_include_directories(qtgen_umbrella_tu PRIVATE ${_tu_dir})
+target_link_libraries(qtgen_umbrella_tu PRIVATE
+    logos_qt_sdk
+    Qt${QT_VERSION_MAJOR}::Core
+)
