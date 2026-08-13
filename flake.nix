@@ -13,6 +13,28 @@
       url = "github:logos-co/logos-lidl";
       inputs.logos-nix.follows = "logos-nix";
     };
+    # Where the Qt host runtime lives now: logos-plugin-qt's `logos-qt-host`
+    # package owns LogosAPI, LogosAPIProvider, LogosProviderBase, the QObject
+    # adapter and the Qt argument decoder. This SDK re-exports it.
+    #
+    # The three `follows` are load-bearing, not tidiness. logos-qt-host links
+    # logos-protocol, and so does this SDK; if the two resolved to different
+    # logos-protocol revisions the closure would carry two TokenManagers, two
+    # transport registries and two of every other function-local static in
+    # there — the exact split-brain the Windows single-provider work spent
+    # itself closing, reintroduced through the lock file instead of the linker.
+    #
+    # Pinned by rev, unlike every other input here, because the commit that
+    # introduces logos-qt-host has not reached logos-plugin-qt's master yet —
+    # an unpinned input would lock onto a master with no such package and this
+    # flake would not evaluate. The workspace pins the same rev. Drop the rev
+    # once it merges.
+    logos-plugin-qt = {
+      url = "github:logos-co/logos-plugin-qt/778b4c5fd2a497b1e053ab2c1532777101ce1c71";
+      inputs.logos-nix.follows = "logos-nix";
+      inputs.logos-protocol.follows = "logos-protocol";
+      inputs.logos-lidl.follows = "logos-lidl";
+    };
     # Test-only: logos-cpp-generator is used to generate the provider
     # dispatch fixture exercised by test_provider_dispatch.
     logos-cpp-sdk = {
@@ -23,7 +45,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-protocol, logos-lidl, logos-cpp-sdk }:
+  outputs = { self, nixpkgs, logos-nix, logos-protocol, logos-lidl, logos-cpp-sdk, logos-plugin-qt }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
@@ -32,6 +54,7 @@
         protocolLib = logos-protocol.packages.${system}.logos-protocol-lib;
         cppGenerator = logos-cpp-sdk.packages.${system}.cpp-generator;
         lidlPkg = logos-lidl.packages.${system}.logos-lidl;
+        qtHost = logos-plugin-qt.packages.${system}.logos-qt-host;
       });
 
       # Same as forAllSystems, plus the "x86_64-windows" pseudo-system. This
@@ -47,16 +70,30 @@
         nixpkgs.lib.genAttrs (systems ++ [ "x86_64-windows" ]) (system:
           let
             isWin = system == "x86_64-windows";
-          in
-          f {
-            inherit system;
             pkgs =
               if isWin then logos-nix.lib.mkWindowsPkgs { buildSystem = windowsBuildSystem; }
               else import nixpkgs { inherit system; };
+            protocolLib = logos-protocol.packages.${system}.logos-protocol-lib;
+          in
+          f {
+            inherit system pkgs;
 
             # Target-side library: follows the target.
-            protocolLib = logos-protocol.packages.${system}.logos-protocol-lib;
+            inherit protocolLib;
             lidlPkg = logos-lidl.packages.${system}.logos-lidl;
+
+            # The Qt host runtime. logos-plugin-qt publishes it for the unix
+            # systems only, so the Windows target builds the same sources here
+            # instead — see nix/qt-host-windows.nix for why that is a duplicated
+            # recipe and not a duplicated archive.
+            qtHost =
+              if isWin
+              then import ./nix/qt-host-windows.nix {
+                inherit pkgs protocolLib;
+                common = import ./nix/default.nix { inherit pkgs; };
+                pluginQtSrc = logos-plugin-qt;
+              }
+              else logos-plugin-qt.packages.${system}.logos-qt-host;
 
             # HOST TOOL: the code generator is executed during the build, so it
             # must be a native binary for the machine doing the building. Taking
@@ -68,12 +105,12 @@
           });
     in
     {
-      packages = forAllTargets ({ pkgs, protocolLib, cppGenerator, lidlPkg, ... }:
+      packages = forAllTargets ({ pkgs, protocolLib, cppGenerator, lidlPkg, qtHost, ... }:
         let
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
 
-          lib = import ./nix/lib.nix { inherit pkgs common src protocolLib; };
+          lib = import ./nix/lib.nix { inherit pkgs common src protocolLib qtHost; };
           qtGenerator = import ./nix/qt-generator.nix {
             inherit pkgs src;
             cppGeneratorBin = cppGenerator;
@@ -81,13 +118,19 @@
           };
           include = import ./nix/include.nix { inherit pkgs common src; };
           tests = import ./nix/tests.nix {
-            inherit pkgs common src protocolLib cppGenerator qtGenerator;
+            inherit pkgs common src protocolLib cppGenerator qtGenerator qtHost;
           };
 
           qtSdk = pkgs.symlinkJoin {
             name = "logos-qt-sdk";
             paths = [ lib include ];
-            propagatedBuildInputs = common.propagatedBuildInputs;
+            # qtHost is propagated by the JOIN as well as by `lib`, because
+            # symlinkJoin does not inherit the propagated inputs of the paths it
+            # joins and this attribute — not `lib` — is what consumers add to
+            # their buildInputs. Without it a consumer's find_package(
+            # logos-qt-sdk) would fall back to the Config's baked HINTS instead
+            # of resolving logos-qt-host off CMAKE_PREFIX_PATH.
+            propagatedBuildInputs = common.propagatedBuildInputs ++ [ qtHost ];
           };
         in
         {
@@ -101,7 +144,7 @@
         }
       );
 
-      checks = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg, ... }:
+      checks = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg, qtHost, ... }:
         let
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
@@ -111,7 +154,7 @@
             logos-lidl = lidlPkg;
           };
           tests = import ./nix/tests.nix {
-            inherit pkgs common src protocolLib cppGenerator qtGenerator;
+            inherit pkgs common src protocolLib cppGenerator qtGenerator qtHost;
           };
         in
         {
@@ -119,7 +162,7 @@
         }
       );
 
-      devShells = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg, ... }: {
+      devShells = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg, qtHost, ... }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.cmake
@@ -134,10 +177,12 @@
             pkgs.openssl
             pkgs.nlohmann_json
             protocolLib
+            qtHost
             cppGenerator
           ];
           shellHook = ''
             export LOGOS_PROTOCOL_ROOT="${protocolLib}"
+            export LOGOS_QT_HOST_ROOT="${qtHost}"
           '';
         };
       });

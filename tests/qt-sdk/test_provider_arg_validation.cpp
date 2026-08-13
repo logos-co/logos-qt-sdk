@@ -46,7 +46,9 @@
 #include "logos_provider_object.h"
 #include "logos_qt_arg_decode.h"
 #include "qt_provider_object.h"
-#include "../../core/interface.h"
+// By name, not by a path relative to this file — see the note in
+// test_auth_token_enforcement.cpp.
+#include <core/interface.h>
 #include "fixtures/sample_provider.h"
 
 namespace {

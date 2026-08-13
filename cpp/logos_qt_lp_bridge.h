@@ -42,7 +42,8 @@
 
 #include "logos_lp_client.h"      // logos::LpClient / LpSubscription (logos-cpp-sdk)
 
-#include "logos_api.h"            // LogosAPI
+#include "logos_api.h"            // LogosAPI (logos-qt-host, via the forwarder
+                                  // installed next to this header)
 
 namespace logos {
 namespace qt {

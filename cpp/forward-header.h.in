@@ -1,0 +1,29 @@
+// TRANSITIONAL FORWARDER — generated. The real @FORWARD_HEADER@ lives in
+// logos-qt-host (logos-plugin-qt), which owns the Qt host runtime now:
+// LogosAPI, LogosAPIProvider, LogosProviderBase, the legacy QObject adapter,
+// the Qt argument decoder and the plugin interface. logos-qt-sdk keeps the
+// public surface — `find_package(logos-qt-sdk)`, `logos-qt-sdk::logos_qt_sdk`,
+// and every historical header name — but no longer owns the code, so nothing
+// in a process can end up with two LogosAPIs or two TokenManager singletons.
+// These forwarders exist only so the nine repos that still include these names
+// from the logos-qt-sdk prefix compile with no edit; they go away when those
+// repos are repointed at logos-qt-host.
+//
+// WHY THE INCLUDE IS AN ABSOLUTE PATH, and why it is generated at build time
+// rather than written by hand. Both prefixes ship this header under the same
+// name, in the same relative positions (flat in include/, again in
+// include/cpp/), and consumers put several of those directories on the include
+// path in an order nobody controls. A relative `#include "@FORWARD_HEADER@"`
+// therefore finds THIS file again rather than logos-qt-host's.
+//
+// The obvious fix, `#include_next`, is not available: moc has its own
+// preprocessor and does not implement that directive. It does not warn — it
+// skips the line — so the C++ compiler sees the real declarations and moc sees
+// none, and the build dies much later with "Undefined interface" or a parse
+// error inside a generated plugin header. Naming the file outright is the one
+// spelling that both preprocessors resolve identically.
+//
+// The path is a Nix store path: immutable, and recorded as a runtime reference
+// of this package, exactly like the logos-qt-host prefix baked into
+// logos-qt-sdkConfig.cmake.
+#include "@LOGOS_QT_HOST_INCLUDE@/@FORWARD_HEADER@"

@@ -1,5 +1,13 @@
-# Builds the logos-qt-sdk static library + CMake package config
-{ pkgs, common, src, protocolLib }:
+# Builds the logos-qt-sdk CMake package config
+#
+# There is no archive here any more. The five translation units this used to
+# compile live in logos-qt-host (logos-plugin-qt); `logos_qt_sdk` is an
+# INTERFACE target that links it, so what this derivation installs is the
+# package config, the export set and the forwarding headers. qtHost is a
+# propagated input so a consumer that only asks for logos-qt-sdk still gets
+# logos-qt-host's prefix on CMAKE_PREFIX_PATH and its include dir on the
+# compiler's search path.
+{ pkgs, common, src, protocolLib, qtHost }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-lib";
@@ -11,9 +19,9 @@ pkgs.stdenv.mkDerivation {
 
   inherit src;
   inherit (common) nativeBuildInputs cmakeFlags meta;
-  buildInputs = common.buildInputs ++ [ protocolLib ];
+  buildInputs = common.buildInputs ++ [ protocolLib qtHost ];
 
-  propagatedBuildInputs = common.propagatedBuildInputs ++ [ protocolLib ];
+  propagatedBuildInputs = common.propagatedBuildInputs ++ [ protocolLib qtHost ];
 
   dontUseCmakeConfigure = true;
 
@@ -23,7 +31,8 @@ pkgs.stdenv.mkDerivation {
     mkdir -p build-qt-sdk
     cd build-qt-sdk
     cmake ../cpp -GNinja -DCMAKE_INSTALL_PREFIX=$out \
-      -DLOGOS_PROTOCOL_ROOT=${protocolLib} $cmakeFlags
+      -DLOGOS_PROTOCOL_ROOT=${protocolLib} \
+      -DLOGOS_QT_HOST_ROOT=${qtHost} $cmakeFlags
     ninja
     cd ..
 
