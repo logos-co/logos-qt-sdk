@@ -101,7 +101,7 @@
         }
       );
 
-      checks = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg }:
+      checks = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg, ... }:
         let
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
@@ -119,7 +119,7 @@
         }
       );
 
-      devShells = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg }: {
+      devShells = forAllSystems ({ pkgs, protocolLib, cppGenerator, lidlPkg, ... }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.cmake
