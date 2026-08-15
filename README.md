@@ -6,15 +6,17 @@ base classes (`LogosProviderBase`, `LogosProviderPlugin`, the
 `LOGOS_PROVIDER`/`LOGOS_METHOD` macros), and the legacy `QObject`/`Q_INVOKABLE`
 provider glue (`QtProviderObject`).
 
-> **Transitional:** that runtime now LIVES in `logos-qt-host`
-> ([`logos-plugin-qt`](https://github.com/logos-co/logos-plugin-qt)), where a Qt
-> plugin build already finds it. This repo keeps the surface — the same
-> `find_package(logos-qt-sdk)`, the same `logos-qt-sdk::logos_qt_sdk` target,
-> the same header names at the same paths — but `logos_qt_sdk` is an INTERFACE
-> library that links `logos-qt-host::logos_qt_host`, and the headers here are
-> generated forwarders (see `cpp/forward-header.h.in`). Nothing links two copies
-> of `LogosAPI` at any point. Consumers get repointed at `logos-qt-host` in a
-> later step, and the forwarders go with them.
+> **That runtime does not live here.** It moved to `logos-qt-host`
+> ([`logos-plugin-qt`](https://github.com/logos-co/logos-plugin-qt)), and every
+> consumer now names that package directly. This repo keeps the surface — the
+> same `find_package(logos-qt-sdk)` and the same `logos-qt-sdk::logos_qt_sdk`
+> target — but `logos_qt_sdk` is an INTERFACE library whose only job is to link
+> `logos-qt-host::logos_qt_host`. The transitional forwarding headers that once
+> re-exported `logos_api.h` & co. from this prefix are gone; the only copy of
+> those headers in any closure is logos-qt-host's.
+>
+> What this repo still OWNS is `logos_ui_plugin_context.h`,
+> `logos_qt_lp_bridge.h`, `logos_qt_wire.h` and the `logos-qt-generator` binary.
 
 Layered over [`logos-protocol`](https://github.com/logos-co/logos-protocol)
 (transports, token exchange, consumer core, the `lp_*` C ABI). Qt-plugin and

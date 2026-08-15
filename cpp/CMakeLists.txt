@@ -82,54 +82,22 @@ target_include_directories(logos_qt_sdk INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
-# The forwarding headers.
+# There are no forwarding headers here any more.
 #
-# Every name this SDK used to ship is still installed under every path it used
-# to be installed at, so no consumer changes an include line and no consumer
-# changes a layout probe -- logos-module-builder, logos-basecamp and
-# logos-test-framework all decide "source checkout or installed prefix?" by
-# testing for include/cpp/logos_api.h, and would report "logos-qt-sdk not found"
-# while looking straight at the prefix if it disappeared.
+# Between the host split and the repoint this package generated a forwarder for
+# each of the six names that moved (logos_api.h, logos_api_provider.h,
+# logos_provider_object.h, qt_provider_object.h, logos_qt_arg_decode.h,
+# core/interface.h) so consumers could keep including them from this prefix
+# unchanged. Every consumer now names logos-qt-host directly, so those files
+# were two spellings of one header sitting on the same include path — the shape
+# that lets a build silently pick the wrong copy. They are deleted, not
+# deprecated: the only logos_api.h in a closure is logos-qt-host's.
 #
-# They are generated rather than committed because the include they contain is
-# an absolute path into logos-qt-host; forward-header.h.in explains why nothing
-# relative can work here.
-#
-# Ask the imported target where its headers are rather than assuming
-# <prefix>/include, so a layout change in logos-qt-host fails here at configure
-# time instead of producing forwarders that point at nothing.
-get_target_property(_qt_host_include_dirs
-    logos-qt-host::logos_qt_host INTERFACE_INCLUDE_DIRECTORIES)
-if(NOT _qt_host_include_dirs)
-    message(FATAL_ERROR
-        "logos-qt-host::logos_qt_host declares no INTERFACE_INCLUDE_DIRECTORIES; "
-        "cannot generate the forwarding headers.")
-endif()
-list(GET _qt_host_include_dirs 0 LOGOS_QT_HOST_INCLUDE)
-
-set(LOGOS_QT_SDK_FORWARDED_HEADERS
-    logos_api.h
-    logos_api_provider.h
-    logos_provider_object.h
-    qt_provider_object.h
-    logos_qt_arg_decode.h
-    # The legacy Qt plugin interface (PluginInterface / initLogos(LogosAPI*)),
-    # which consumers include as "core/interface.h" -- the subdirectory is part
-    # of the name, so it is forwarded under that name too.
-    core/interface.h
-)
-
-set(_forward_dir "${CMAKE_CURRENT_BINARY_DIR}/forward")
-foreach(FORWARD_HEADER IN LISTS LOGOS_QT_SDK_FORWARDED_HEADERS)
-    if(NOT EXISTS "${LOGOS_QT_HOST_INCLUDE}/${FORWARD_HEADER}")
-        message(FATAL_ERROR
-            "logos-qt-host does not ship ${FORWARD_HEADER} at "
-            "${LOGOS_QT_HOST_INCLUDE}; a forwarder for it would be a dangling "
-            "include that only fails in a consumer's build.")
-    endif()
-    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/forward-header.h.in"
-                   "${_forward_dir}/${FORWARD_HEADER}" @ONLY)
-endforeach()
+# What this package still installs is what it owns: logos_ui_plugin_context.h,
+# and (from the headers derivation, in the source-export layout) logos_qt_wire.h
+# and logos_qt_lp_bridge.h. Consumers that also need the host runtime get its
+# include directory transitively, through the logos-qt-host::logos_qt_host that
+# the link interface above already names.
 
 install(TARGETS logos_qt_sdk
     EXPORT logos-qt-sdkTargets
@@ -150,8 +118,9 @@ include(CMakePackageConfigHelpers)
 # Where logos-qt-host was found when THIS package was built, baked into the
 # generated Config as a HINTS fallback.
 #
-# Consumers must not have to learn about logos-qt-host to keep working — that is
-# the whole point of the forwarding step — and most of them call
+# `logos-qt-sdk::logos_qt_sdk` names logos-qt-host in its link interface, so a
+# consumer that imports this package MUST be able to resolve logos-qt-host or
+# the import fails outright. Most of them call
 # `find_package(logos-qt-sdk PATHS <prefix> NO_DEFAULT_PATH)`, which tells CMake
 # nothing about where anything else lives. HINTS is consulted AFTER
 # CMAKE_PREFIX_PATH, so a consumer that does know (every Nix build, where
@@ -175,39 +144,12 @@ install(FILES
     DESTINATION lib/cmake/logos-qt-sdk
 )
 
-# Headers keep their historical names AND their historical positions, so
-# existing `#include "logos_api.h"` / `#include "core/interface.h"` lines
-# resolve unchanged whichever of this prefix's include directories a consumer
-# put on the search path. The forwarders are installed twice on purpose --
-# flat, and again under include/cpp/ where the source-export layout put them --
-# because consumers add both directories and probe the second one. Duplicated
-# forwarders are harmless: each one names the same absolute file, and that file
-# has its own include guard.
-#
-# logos_ui_plugin_context.h is NOT forwarded: it is this SDK's own header, not
-# part of the host runtime that moved.
+# This SDK's own Qt-typed header, at the flat include root the CMake export
+# layout uses. nix/include.nix ships the same file (plus logos_qt_wire.h and
+# logos_qt_lp_bridge.h) under include/cpp/ for the source-export layout; the two
+# halves are joined in flake.nix and their file sets stay disjoint apart from
+# this one deliberate mirror.
 install(FILES
-    ${_forward_dir}/logos_api.h
-    ${_forward_dir}/logos_api_provider.h
-    ${_forward_dir}/logos_provider_object.h
-    ${_forward_dir}/qt_provider_object.h
-    ${_forward_dir}/logos_qt_arg_decode.h
     logos_ui_plugin_context.h
     DESTINATION include
-)
-install(FILES
-    ${_forward_dir}/logos_api.h
-    ${_forward_dir}/logos_api_provider.h
-    ${_forward_dir}/logos_provider_object.h
-    ${_forward_dir}/qt_provider_object.h
-    ${_forward_dir}/logos_qt_arg_decode.h
-    DESTINATION include/cpp
-)
-
-# Legacy Qt plugin interface (PluginInterface / initLogos(LogosAPI*)) —
-# installed at include/core/ exactly where logos-cpp-sdk shipped it, and a
-# forwarder now like the rest.
-install(FILES
-    ${_forward_dir}/core/interface.h
-    DESTINATION include/core
 )

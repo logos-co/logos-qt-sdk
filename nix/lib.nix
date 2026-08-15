@@ -3,7 +3,7 @@
 # There is no archive here any more. The five translation units this used to
 # compile live in logos-qt-host (logos-plugin-qt); `logos_qt_sdk` is an
 # INTERFACE target that links it, so what this derivation installs is the
-# package config, the export set and the forwarding headers. qtHost is a
+# package config, the export set and logos_ui_plugin_context.h. qtHost is a
 # propagated input so a consumer that only asks for logos-qt-sdk still gets
 # logos-qt-host's prefix on CMAKE_PREFIX_PATH and its include dir on the
 # compiler's search path.

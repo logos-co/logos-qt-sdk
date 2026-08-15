@@ -11,12 +11,13 @@
 #   guarded by LOGOS_QT_SDK_IS_SOURCE, which is FALSE for an installed prefix --
 #   i.e. false for every Nix build, which is all of them.
 #
-#   The five moved headers and core/interface.h. They still land in
-#   include/cpp/, but they come from the `lib` derivation now: they are
-#   generated forwarders that name an absolute path into logos-qt-host, and this
-#   derivation has no idea where that is. Nothing about the resulting prefix
-#   changes -- the two halves are joined in flake.nix, and the file sets stay
-#   disjoint.
+#   The five moved headers and core/interface.h. They are logos-qt-host's, and
+#   this prefix does not re-export them under any name: a consumer that needs
+#   LogosAPI takes logos-qt-host's include directory, which arrives through
+#   logos-qt-sdk::logos_qt_sdk's link interface. `cp cpp/*.h` below is therefore
+#   exactly this SDK's own three headers -- logos_ui_plugin_context.h,
+#   logos_qt_lp_bridge.h, logos_qt_wire.h -- and stays that way as long as
+#   cpp/ holds only what this SDK owns.
 { pkgs, common, src }:
 
 pkgs.stdenv.mkDerivation {
