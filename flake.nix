@@ -4,8 +4,14 @@
   inputs = {
     logos-nix.url = "github:logos-co/logos-nix";
     nixpkgs.follows = "logos-nix/nixpkgs";
+    # Pinned by rev for the same reason logos-plugin-qt is, below: the Qt host
+    # runtime this SDK re-exports calls TokenManager::forIdentity/isolateIdentity,
+    # and those are on feat/per-client-token-store — NOT on logos-protocol's
+    # master. An unpinned url would lock onto master and logos-qt-host would not
+    # compile. c8bab12 is a fast-forward from master (it contains e6d5b57), so
+    # nothing on master is given up by pinning it. Drop the rev once it merges.
     logos-protocol = {
-      url = "github:logos-co/logos-protocol";
+      url = "github:logos-co/logos-protocol/c8bab12834dbf92155b483546875e6078d17c74e";
       inputs.logos-nix.follows = "logos-nix";
     };
     # The canonical, language-neutral LIDL frontend the qt-generator links.
@@ -30,7 +36,7 @@
     # flake would not evaluate. The workspace pins the same rev. Drop the rev
     # once it merges.
     logos-plugin-qt = {
-      url = "github:logos-co/logos-plugin-qt/778b4c5fd2a497b1e053ab2c1532777101ce1c71";
+      url = "github:logos-co/logos-plugin-qt/8ccb1fc81642ee52e843b69ac3f90a1ec7084299";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
