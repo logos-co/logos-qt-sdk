@@ -35,8 +35,17 @@
     # an unpinned input would lock onto a master with no such package and this
     # flake would not evaluate. The workspace pins the same rev. Drop the rev
     # once it merges.
+    #
+    # cc24fa1 is the tip of logos-plugin-qt's feat/b4-qt-host-windows-target,
+    # rebased onto that repo's master (8846fc5 is an ancestor of it). It
+    # replaces the previous 8ccb1fc pin, which was never pushed to a branch
+    # that survives the rebase. Of the two branches carrying the qt-host work
+    # this is the SUPERSET one — feat/b4-qt-host-windows-target-8ccb1fc
+    # (989f6ae) is the same work minus the "one LogosModule.cmake" and view
+    # template commits that logos-module-builder needs. Pinning the superset
+    # here keeps a single logos-qt-host in every downstream closure.
     logos-plugin-qt = {
-      url = "github:logos-co/logos-plugin-qt/8ccb1fc81642ee52e843b69ac3f90a1ec7084299";
+      url = "github:logos-co/logos-plugin-qt/cc24fa1c0c43b2d96c1dc165ee545a0321318b59";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
