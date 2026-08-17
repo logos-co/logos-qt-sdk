@@ -19,6 +19,9 @@ add_custom_command(
 
 add_executable(qt_sdk_tests
     test_main.cpp
+    # The HOST capability's Qt marshalling layer. Only the std <-> Qt edge is
+    # tested here; the substance lives in logos-cpp-sdk's test_logos_host_core.
+    test_qt_host_core.cpp
     # Argument decoding for a Qt-typed provider — moved here with the decoder
     # itself, which logos-protocol hosted but never used.
     test_qt_arg_decode.cpp

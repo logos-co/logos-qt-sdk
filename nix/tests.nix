@@ -30,7 +30,7 @@ pkgs.stdenv.mkDerivation {
     mkdir -p build-tests
     cd build-tests
     cmake ../tests -GNinja -DLOGOS_PROTOCOL_ROOT=${protocolLib} \
-      -DLOGOS_QT_HOST_ROOT=${qtHost} $cmakeFlags
+      -DLOGOS_QT_HOST_ROOT=${qtHost} -DLOGOS_CPP_SDK_ROOT=${cppSdkInclude} $cmakeFlags
     ninja
     cd ..
 
