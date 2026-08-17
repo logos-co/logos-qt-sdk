@@ -50,10 +50,23 @@
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
     };
-    # Test-only: logos-cpp-generator is used to generate the provider
-    # dispatch fixture exercised by test_provider_dispatch.
+    # Two things, neither of them a generated test fixture any more: the
+    # `cpp-generator` package ships the shared LIDL frontend sources that
+    # logos-qt-generator compiles (share/lidl-frontend, see nix/qt-generator.nix),
+    # and `logos-cpp-include` supplies the Qt-free headers this SDK's host
+    # veneer and the test suite's single-TU compile check include.
+    #
+    # It used to also generate tests/qt-sdk's provider-dispatch fixture via
+    # `logos-cpp-generator --provider-header`; that flag, and the
+    # `interface: "provider"` authoring path behind it, were removed.
+    # Rev-pinned: cpp/CMakeLists.txt requires logos_host_core.h (the std host
+    # façade the Qt veneer here wraps), which arrives with 2ef1c25 — the
+    # capability split. cpp-sdk's master and its previous pin ship only the five
+    # pre-split headers, so an unpinned url fails at CONFIGURE with
+    # "logos-cpp-sdk not found ... looked for include/cpp/logos_host_core.h".
+    # Drop the rev once feat/sdk-codegen-b3-d11 merges.
     logos-cpp-sdk = {
-      url = "github:logos-co/logos-cpp-sdk";
+      url = "github:logos-co/logos-cpp-sdk/2ef1c25";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
