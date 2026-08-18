@@ -32,6 +32,10 @@ add_executable(qt_sdk_tests
     # from (logos_qt_wire.h). One round-trip per surface type, so the generator
     # can emit one pair of calls everywhere instead of a table per direction.
     test_qt_wire.cpp
+    # The other half of that seam: which (origin, target) pair a generated
+    # wrapper's transport is keyed by, and that a STATED origin is never
+    # collapsed into a derived one.
+    test_qt_lp_bridge_origin.cpp
 )
 
 target_include_directories(qt_sdk_tests PRIVATE

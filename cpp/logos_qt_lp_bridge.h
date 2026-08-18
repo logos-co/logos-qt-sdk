@@ -25,6 +25,7 @@
 #include <QString>
 #include <QVariant>
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
@@ -78,6 +79,12 @@ namespace qt {
 //   hook.) `syncTokens` is that hook, and it is a hard prerequisite for this
 //   whole design, not an optimisation.
 class LpBridge {
+    // How a bridge mirrors the host's bootstrap tokens into the plugin's own
+    // TokenManager, when it has a LogosAPI to read them from. A raw function
+    // pointer rather than a std::function so it is trivially atomic (and so the
+    // one implementation stays visible in this header).
+    using SyncFn = void (*)(LpBridge*);
+
 public:
     logos::LpClient& client() { syncTokens(); return m_client; }
 
@@ -138,32 +145,87 @@ public:
         return true;
     }
 
-    // The bridge for (this module, `target`). Stable address: entries are
-    // never erased and are held by unique_ptr, so a wrapper may keep the
-    // pointer.
+    // The bridge for (this module, `target`), where "this module" is the one
+    // the LogosAPI speaks for. Stable address: entries are never erased and are
+    // held by unique_ptr, so a wrapper may keep the pointer.
     static LpBridge* forTarget(LogosAPI* api, const QString& target)
     {
         if (!api) return nullptr;
-        const std::string origin = api->moduleName().toStdString();
-        const std::string key = origin + "\x1f" + target.toStdString();
+        // The one place an origin is DERIVED rather than stated. Correct here,
+        // because `api` IS this module's own identity object — and the reason
+        // forOrigin below exists rather than a wrapper reusing this: a consumer
+        // handed someone else's LogosAPI would silently call out under the
+        // LENDER's name, which is a privilege escalation the transport cannot
+        // see. Anything without its own LogosAPI must state its origin.
+        // `&syncFromApi` is taken HERE and nowhere else, and that placement is
+        // load-bearing rather than tidy — see syncFromApi's own comment.
+        return lookup(api->moduleName().toStdString(), target.toStdString(), api,
+                      &LpBridge::syncFromApi);
+    }
+
+    // The bridge for (`origin`, `target`) with NO LogosAPI: the binding a
+    // generated consumer wrapper uses when the module it belongs to has no
+    // identity object — a cdylib module, whose provider surface is the std
+    // `logos_module_impl.h` C ABI.
+    //
+    // `origin` is ASSERTED, never derived. It is the consuming module's own
+    // name, baked into the generated umbrella from `metadata.json#name` and
+    // threaded through the wrapper's constructor verbatim. There is deliberately
+    // no overload that infers it from anything: inference is what let a reused
+    // bridge inherit its caller's identity.
+    //
+    // The absent LogosAPI costs nothing HERE, and that is a property of the
+    // caller rather than luck. `syncTokens` exists to mirror the host's
+    // bootstrap tokens into the plugin's own TokenManager, because a Qt PLUGIN
+    // links its own copy of the protocol library and the host writes to a
+    // different instance. A cdylib module has no such gap: its glue already
+    // forwards tokens across the C ABI (`logos_module_accept_token` ->
+    // `lp_token_save`) into the very TokenManager this bridge's lp client
+    // reads. So a null api means "tokens arrive by the other route", not
+    // "tokens are missing" — and `syncTokens` correctly does nothing.
+    static LpBridge* forOrigin(const QString& origin, const QString& target)
+    {
+        return lookup(origin.toStdString(), target.toStdString(), nullptr, nullptr);
+    }
+
+private:
+    // One bridge per (origin, target) for BOTH factories — the invariant this
+    // class documents is about the pair, not about how the pair was spelled.
+    //
+    // `api` is adopted rather than overwritten: null -> non-null only, never the
+    // reverse. Sharing the registry otherwise has one failure mode — an
+    // api-less bridge created first would leave a later Qt-plugin caller
+    // without `syncTokens`, i.e. an empty auth token and a call that fails
+    // silently, the exact defect syncTokens was added for. Adoption removes it.
+    // (Two LogosAPIs answering the same moduleName would be pathological; the
+    // first one wins.)
+    static LpBridge* lookup(const std::string& origin, const std::string& target,
+                            LogosAPI* api, SyncFn sync)
+    {
+        const std::string key = origin + "\x1f" + target;
         static std::mutex s_mutex;
         static std::map<std::string, std::unique_ptr<LpBridge>> s_bridges;
         std::lock_guard<std::mutex> lock(s_mutex);
         auto it = s_bridges.find(key);
         if (it == s_bridges.end()) {
             it = s_bridges.emplace(key, std::unique_ptr<LpBridge>(
-                                            new LpBridge(api, target.toStdString(), origin)))
+                                            new LpBridge(api, sync, target, origin)))
                      .first;
+        } else if (sync && !it->second->m_sync.load(std::memory_order_relaxed)) {
+            // Publish the api BEFORE the hook that reads it: a concurrent
+            // syncTokens acquire-loads m_sync, so seeing a non-null hook implies
+            // seeing the api it was installed for.
+            it->second->m_api.store(api, std::memory_order_relaxed);
+            it->second->m_sync.store(sync, std::memory_order_release);
         }
         return it->second.get();
     }
 
-private:
     using ResultBox = std::function<void(nlohmann::json, const logos::CallError&)>;
 
-    LpBridge(LogosAPI* api, std::string target, std::string origin)
-        : m_api(api), m_target(std::move(target)), m_origin(std::move(origin)),
-          m_client(m_target, m_origin) {}
+    LpBridge(LogosAPI* api, SyncFn sync, std::string target, std::string origin)
+        : m_api(api), m_sync(sync), m_target(std::move(target)),
+          m_origin(std::move(origin)), m_client(m_target, m_origin) {}
 
     // The client invokeAsyncResult calls the C ABI on, created on first use and
     // never destroyed — same lifetime as m_client, and destroying it is what
@@ -233,8 +295,34 @@ private:
     // the same capability flow once it can authenticate.
     void syncTokens()
     {
-        if (!m_api) return;
-        TokenManager* tm = m_api->getTokenManager();
+        SyncFn fn = m_sync.load(std::memory_order_acquire);
+        if (fn) fn(this);
+    }
+
+    // The ONLY code in this class that touches LogosAPI's or TokenManager's
+    // out-of-line members, and it is reached exclusively through a pointer
+    // installed by forTarget.
+    //
+    // That indirection is the point, and it is not style. This is a header, so
+    // every function in it is emitted into a translation unit only if that TU
+    // ODR-uses it — and ODR-use is STATIC, not a runtime branch. When syncTokens
+    // named `m_api->getTokenManager()` directly, syncTokens was reached from
+    // `client()`, which every generated call goes through; so ANY TU using this
+    // seam emitted a reference to `LogosAPI::getTokenManager()` and
+    // `TokenManager::getToken()` — including one whose bridge is api-less by
+    // construction and could never call them. Measured on the origin-bound
+    // compile probe: two undefined Qt-host symbols in a translation unit whose
+    // whole premise is that it needs no Qt host identity object.
+    //
+    // Taking `&syncFromApi` inside forTarget — and passing it down, rather than
+    // branching on `api` inside lookup, which both factories call — moves that
+    // ODR-use to the one place that genuinely means it. A module that only ever
+    // calls forOrigin links none of it.
+    static void syncFromApi(LpBridge* self)
+    {
+        LogosAPI* api = self->m_api.load(std::memory_order_relaxed);
+        if (!api) return;
+        TokenManager* tm = api->getTokenManager();
         if (!tm) return;
         static const char* const kBootstrapKeys[] = { "capability_module", "core" };
         for (const char* key : kBootstrapKeys) {
@@ -243,7 +331,13 @@ private:
         }
     }
 
-    LogosAPI* m_api = nullptr;
+    // Atomic only so `lookup` may adopt one into an already-published bridge
+    // without racing a concurrent `syncTokens`; the pointer itself never
+    // changes twice. Read ONLY by syncFromApi.
+    std::atomic<LogosAPI*> m_api{nullptr};
+    // Null on the forOrigin path, and left null: an api-less bridge has nothing
+    // to mirror (a cdylib's tokens arrive through the C ABI instead).
+    std::atomic<SyncFn> m_sync{nullptr};
     std::string m_target;
     std::string m_origin;
     logos::LpClient m_client;
@@ -257,10 +351,11 @@ private:
 //
 // Free functions taking a possibly-null bridge, so the emitted bodies stay one
 // line each and no generated code has to know what "no bridge" means. A null
-// bridge only happens when the wrapper was constructed with a null LogosAPI —
-// which already could not work — and it yields a JSON null, which every
-// `fromWire<T>` turns into a default-constructed T. One expression, no
-// per-type default table.
+// bridge only happens on the forTarget path, when the wrapper was constructed
+// with a null LogosAPI — which already could not work — and it yields a JSON
+// null, which every `fromWire<T>` turns into a default-constructed T. One
+// expression, no per-type default table. (forOrigin cannot return null: an
+// asserted origin is always enough to key a bridge.)
 
 inline nlohmann::json invoke(LpBridge* bridge,
                              const std::string& method,
@@ -271,7 +366,7 @@ inline nlohmann::json invoke(LpBridge* bridge,
     if (!bridge) {
         if (err) {
             err->code = "object_unavailable";
-            err->message = "no LogosAPI: consumer wrapper has no transport";
+            err->message = "consumer wrapper has no transport (null bridge)";
         }
         return nlohmann::json();
     }
@@ -300,7 +395,7 @@ inline void invokeAsyncResult(LpBridge* bridge,
         // whole point is that the callback can tell.
         logos::CallError err;
         err.code = "object_unavailable";
-        err.message = "no LogosAPI: consumer wrapper has no transport";
+        err.message = "consumer wrapper has no transport (null bridge)";
         cb(nlohmann::json(), err);
         return;
     }

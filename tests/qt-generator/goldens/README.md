@@ -14,6 +14,8 @@ logos-qt-generator --lidl fixtures/plain_module.lidl --backend qt \
     --impl-header fixture_impl.h --output-dir goldens/plain_qt
 logos-qt-generator --lidl fixtures/plain_module.lidl --backend consumer \
     --output-dir goldens/plain_consumer
+logos-qt-generator --lidl fixtures/plain_module.lidl --backend consumer \
+    --binding origin --output-dir goldens/plain_consumer_origin
 ```
 
 `--impl-header` is pinned so the emitted `#include` does not vary by machine.
@@ -47,3 +49,31 @@ complete set was:
 
 Nothing else differed, and `plain_qt` was untouched: both changes are on the
 consumer surface only.
+
+## `plain_consumer_origin` — the LogosAPI-free binding
+
+Captured when `--binding origin` was added: the same contract through the same
+backend, differing only in how the wrapper reaches a transport. It is here so
+that the *difference between the two bindings* is a reviewable diff rather than
+a claim —
+
+```
+diff -u goldens/plain_consumer/plain_module_api.h goldens/plain_consumer_origin/plain_module_api.h
+diff -u goldens/plain_consumer/plain_module_api.cpp goldens/plain_consumer_origin/plain_module_api.cpp
+```
+
+— and the complete delta is four hunks:
+
+| change | why |
+|---|---|
+| `#include "logos_api.h"` + `#include "logos_api_client.h"` → `#include "logos_mode.h"` | the flavour names neither `LogosAPI` nor `LogosAPIClient`, so it includes neither. `Timeout` — on every method — lives in `logos_mode.h` and had only ever been reached transitively through `logos_api_client.h` |
+| `explicit PlainModule(LogosAPI* api);` → `explicit PlainModule(const QString& origin);` | the constructor is handed the consuming module's own name instead of an identity object to read one off |
+| the `LogosAPI* m_api;` member disappears | nothing in the class holds one; it was already write-only |
+| `LpBridge::forTarget(api, …)` → `LpBridge::forOrigin(origin, …)` | `forTarget` DERIVES the origin from `api->moduleName()`; `forOrigin` is handed it. The ctor parameter is threaded through verbatim — see `CMakeLists.txt`, `origin_consumer_asserts_its_own_origin` |
+
+**Every method, event and record signature is byte-identical between the two.**
+That is the point of the pair: the type surface is decoupled from the transport
+binding, so a module can change how it binds without any call site moving.
+
+`plain_consumer` and `plain_qt` were unchanged by that work, and must stay so —
+the LogosAPI-taking path is additive-only.

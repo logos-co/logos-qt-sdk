@@ -187,9 +187,11 @@ QString eventCbParams(const ModuleDecl& m, const EventDecl& ev)
 QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
                                  const QString& moduleName,
                                  const QString& className,
-                                 QtConsumerBind bind)
+                                 QtConsumerBind bind,
+                                 QtConsumerBinding binding)
 {
     (void)moduleName;
+    const bool noApi = (binding == QtConsumerBinding::ExplicitOrigin);
     QString h;
     QTextStream s(&h);
 
@@ -207,8 +209,16 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
     s << "#include <functional>\n";
     s << "#include <utility>\n";
     s << "#include \"logos_types.h\"\n";
-    s << "#include \"logos_api.h\"\n";
-    s << "#include \"logos_api_client.h\"\n";
+    // The LogosAPI-free flavour names neither LogosAPI nor LogosAPIClient, so
+    // it includes neither. `Timeout` (every method's trailing deadline) then
+    // has to be named directly: it lives in logos_mode.h, which the consumer
+    // header only ever got transitively, through logos_api_client.h.
+    if (noApi) {
+        s << "#include \"logos_mode.h\"\n";
+    } else {
+        s << "#include \"logos_api.h\"\n";
+        s << "#include \"logos_api_client.h\"\n";
+    }
     s << "#include \"logos_call_error.h\"\n";
     s << "#include \"logos_async_result.h\"\n";
     s << "#include \"logos_object.h\"\n\n";
@@ -230,10 +240,20 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
         s << "\n";
     }
 
-    if (bind == QtConsumerBind::Bound)
+    // Four constructors, one per (target x origin) combination. The two
+    // ExplicitOrigin ones take the CONSUMING module's own name as their first
+    // argument; nothing in the class can derive it.
+    if (noApi) {
+        if (bind == QtConsumerBind::Bound)
+            s << "    explicit " << className
+              << "(const QString& origin, const QString& target);\n\n";
+        else
+            s << "    explicit " << className << "(const QString& origin);\n\n";
+    } else if (bind == QtConsumerBind::Bound) {
         s << "    explicit " << className << "(LogosAPI* api, const QString& moduleName);\n\n";
-    else
+    } else {
         s << "    explicit " << className << "(LogosAPI* api);\n\n";
+    }
 
     s << "    using RawEventCallback = std::function<void(const QString&, const QVariantList&)>;\n";
     s << "    using EventCallback = std::function<void(const QVariantList&)>;\n\n";
@@ -288,7 +308,7 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
     }
 
     s << "\nprivate:\n";
-    s << "    LogosAPI* m_api;\n";
+    if (!noApi) s << "    LogosAPI* m_api;\n";
     s << "    QString m_moduleName;\n";
     // Non-owning: the bridge is process-lifetime and keyed by (origin, target),
     // so this wrapper stays a cheap copyable handle and a subscription taken
@@ -305,8 +325,10 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
                                  const QString& moduleName,
                                  const QString& className,
                                  const QString& headerBaseName,
-                                 QtConsumerBind bind)
+                                 QtConsumerBind bind,
+                                 QtConsumerBinding binding)
 {
+    const bool noApi = (binding == QtConsumerBinding::ExplicitOrigin);
     QString c;
     QTextStream s(&c);
 
@@ -431,7 +453,22 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     // and constructing one opens a transport to the target AND one to
     // capability_module. It mints no token — token exchange is lazy, in
     // LogosAPIClient::mintAndCacheToken on first invoke.
-    if (bind == QtConsumerBind::Bound) {
+    //
+    // ExplicitOrigin threads `origin` STRAIGHT into the bridge lookup — the
+    // parameter, unmodified, never a member of some other object. That is the
+    // whole difference from forTarget, which reads the name off the LogosAPI it
+    // was handed: a wrapper built on a borrowed api calls out under the
+    // lender's identity, and the transport has no way to notice.
+    if (noApi && bind == QtConsumerBind::Bound) {
+        s << className << "::" << className << "(const QString& origin, const QString& target)\n";
+        s << "    : m_moduleName(target),\n";
+        s << "      m_bridge(logos::qt::LpBridge::forOrigin(origin, target)) {}\n\n";
+    } else if (noApi) {
+        s << className << "::" << className << "(const QString& origin)\n";
+        s << "    : m_moduleName(QStringLiteral(\"" << moduleName << "\")),\n";
+        s << "      m_bridge(logos::qt::LpBridge::forOrigin(origin, QStringLiteral(\""
+          << moduleName << "\"))) {}\n\n";
+    } else if (bind == QtConsumerBind::Bound) {
         s << className << "::" << className << "(LogosAPI* api, const QString& moduleName)\n";
         s << "    : m_api(api), m_moduleName(moduleName),\n";
         s << "      m_bridge(logos::qt::LpBridge::forTarget(api, moduleName)) {}\n\n";

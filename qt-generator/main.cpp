@@ -23,6 +23,12 @@
 //                       one codec and one Qt type mapper under both consumer
 //                       surfaces instead of two parallel implementations.
 //                       [--module <dep-name>] [--class <C>] [--bind static|bound]
+//                       [--binding api|origin]
+//                       --bind picks the call TARGET (baked vs runtime);
+//                       --binding picks the call ORIGIN: `api` (default) keeps
+//                       the LogosAPI-taking constructor, `origin` emits a
+//                       wrapper with NO LogosAPI that is handed the consuming
+//                       module's own name instead.
 //   --backend ui      UI plugin backend (type=ui_qml + interface=universal):
 //                       --metadata <m.json> --rep <view.rep>
 //                       [--backend-class C] [--backend-header h]
@@ -144,7 +150,8 @@ int main(int argc, char* argv[])
         err << "Usage: logos-qt-generator (--from-header <impl.h> --impl-class <C>\n"
                "         --metadata <metadata.json> | --lidl <contract.lidl>)\n"
                "         --backend <qt|cdylib|ui|consumer>\n"
-               "         [--impl-header <include-name>] [--output-dir <dir>]\n";
+               "         [--impl-header <include-name>] [--output-dir <dir>]\n"
+               "         [--bind static|bound] [--binding api|origin]\n";
         return 1;
     }
     if (implHeader.isEmpty() && fromHeader)
@@ -213,6 +220,25 @@ int main(int argc, char* argv[])
         const QtConsumerBind bindMode =
             (bindArg == "bound") ? QtConsumerBind::Bound : QtConsumerBind::Static;
 
+        // --binding api|origin. A separate axis from --bind: that one names the
+        // call TARGET, this one names the call ORIGIN. `origin` emits the
+        // LogosAPI-free wrapper whose constructor is handed the consuming
+        // module's own name — the surface a cdylib module (no LogosAPI
+        // anywhere) needs in order to hold Qt-typed dependency wrappers.
+        //
+        // An unrecognised value is REFUSED rather than defaulted: defaulting a
+        // misspelt `--binding orgin` back to the LogosAPI form would emit a
+        // wrapper the caller's umbrella cannot construct, and the failure would
+        // land in generated code far from the typo.
+        const QString bindingArg = argValue(args, "--binding");
+        if (!bindingArg.isEmpty() && bindingArg != "api" && bindingArg != "origin") {
+            err << "Unknown --binding: " << bindingArg << " (expected api|origin)\n";
+            return 2;
+        }
+        const QtConsumerBinding bindingMode = (bindingArg == "origin")
+                                                  ? QtConsumerBinding::ExplicitOrigin
+                                                  : QtConsumerBinding::FromApi;
+
         QString recErr;
         if (!lidlCheckRecords(mod, &recErr)) {
             err << recErr << "\n";
@@ -228,9 +254,11 @@ int main(int argc, char* argv[])
         }
 
         const QString headerRel = depName + "_api.h";
-        outs.append({headerRel, lidlMakeQtConsumerHeader(mod, depName, cls, bindMode)});
+        outs.append({headerRel,
+                     lidlMakeQtConsumerHeader(mod, depName, cls, bindMode, bindingMode)});
         outs.append({depName + "_api.cpp",
-                     lidlMakeQtConsumerSource(mod, depName, cls, headerRel, bindMode)});
+                     lidlMakeQtConsumerSource(mod, depName, cls, headerRel, bindMode,
+                                              bindingMode)});
     } else {
         err << "Unknown --backend: " << backend << " (expected qt|cdylib|ui|consumer)\n";
         return 2;
