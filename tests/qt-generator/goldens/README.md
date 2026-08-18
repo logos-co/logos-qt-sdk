@@ -27,7 +27,7 @@ is untouched by construction.
 > pinned the provider glue that emitter produced (`_qt_glue.h`, `_dispatch.cpp`,
 > `_events.cpp`), and it went with the emitter: a module is a plain shared
 > library, and hosting one in Qt is `logos-cpp-generator --backend cdylib`
-> followed by `logos-qt-host-generator`, whose own goldens live in
+> followed by `logos-qt-host-generator --backend cdylib`, whose own goldens live in
 > logos-plugin-qt. Nothing in the two goldens below was captured from it.
 
 `plain_consumer` was rebased once, onto the change that brought the

@@ -27,13 +27,14 @@ implementations depend only on the Qt-free
 ## logos-qt-generator
 
 This repo also hosts **`logos-qt-generator`** (`qt-generator/`,
-`packages.<system>.logos-qt-generator`) — ALL generated Qt glue comes from
-here, per the Qt-confinement invariant (generated Qt code is the Qt layer's
-product; `logos-cpp-generator` keeps the Qt-free outputs):
+`packages.<system>.logos-qt-generator`) — the CONSUMER-side Qt glue and the ui
+plugin backend, per the Qt-confinement invariant (generated Qt code is the Qt
+layer's product; `logos-cpp-generator` keeps the Qt-free outputs). The
+PROVIDER-side Qt glue is not here: hosting a module in Qt is logos-plugin-qt's
+`logos-qt-host-generator`.
 
 | Mode | Input | Emits |
 |------|-------|-------|
-| `--backend cdylib` | `--lidl` contract (or `--from-header`) | the uniform Qt glue over the module-impl C ABI |
 | `--backend consumer` | `--lidl` contract (or `--from-header`) | the Qt-typed CONSUMER wrapper for a dependency / interface: `<name>_api.{h,cpp}` |
 | `--backend ui` | `--metadata` + `--rep` | UI plugin glue: `*Interface.h` + `*Plugin.{h,cpp}` around the user-written `.rep` + `*Backend` class |
 
@@ -48,8 +49,10 @@ plain std impl
 ```
 
 `--backend qt` used to short-circuit that seam by consuming an impl class
-directly, which was the one thing that made a module *not* language-neutral. It
-was removed; asking for it now fails with a pointer to the two tools above.
+directly, which was the one thing that made a module *not* language-neutral.
+`--backend cdylib` respected the seam but emitted its *hosting* half, which
+belongs with the host. Both were removed; asking for either now fails with a
+pointer to the two tools above rather than emitting nothing.
 
 Both generators compile one shared LIDL frontend, distributed by
 logos-cpp-sdk under `share/lidl-frontend/`, so the parsed surface can never

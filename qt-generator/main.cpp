@@ -1,8 +1,8 @@
 // logos-qt-generator — ALL Qt glue emission for Logos modules.
 //
 // The Qt-confinement invariant puts generated Qt code in the Qt layer: this
-// tool (hosted by logos-qt-sdk) emits the Qt-plugin glue for every module
-// flavor, while logos-cpp-sdk's logos-cpp-generator keeps the Qt-free
+// tool (hosted by logos-qt-sdk) emits the Qt CONSUMER glue and the ui plugin
+// backend, while logos-cpp-sdk's logos-cpp-generator keeps the Qt-free
 // outputs (std typed wrappers, the logos_sdk umbrella, cdylib impl-exports,
 // LIDL derivation). Both tools share one LIDL frontend: the sources under
 // logos-cpp-sdk's share/lidl-frontend/, compiled into this binary.
@@ -22,10 +22,10 @@
 //
 // The retired `--backend qt` short-circuited that seam — it consumed an impl
 // class and emitted a Qt provider for it, which is the one thing that made a
-// module NOT language-neutral. Modes:
-//   --backend cdylib  the uniform Qt glue over the module-impl C ABI:
-//                       <name>_cdylib_glue.{h,cpp}
-//                       (the C-ABI impl-exports come from logos-cpp-generator)
+// module NOT language-neutral. `--backend cdylib` is retired too, for a
+// narrower reason: what it emitted was the HOSTING half — Qt glue over the C
+// ABI — and that half belongs with the host, so it lives in logos-plugin-qt's
+// qt-host-generator now. What remains here is the CONSUMER half plus ui. Modes:
 //   --backend consumer  the Qt-TYPED CONSUMER wrapper for a dependency /
 //                       interface: <name>_api.{h,cpp}. Same public surface the
 //                       legacy Qt wrapper had; the bodies convert at the edge
@@ -56,7 +56,6 @@
 
 #include "impl_header_parser.h"
 #include "lidl_emit_common.h"
-#include "lidl_gen_cdylib_glue.h"
 #include "lidl_gen_ui.h"
 #include "lidl_gen_qt_consumer.h"
 
@@ -100,9 +99,6 @@ int main(int argc, char* argv[])
     const QString implClass  = argValue(args, "--impl-class");
     const QString metadata   = argValue(args, "--metadata");
     const QString backend    = argValue(args, "--backend");
-    // concurrency:"multi" (from metadata.json, fed by the builder) ⇒ also emit the
-    // concurrent-dispatch glue (callMethodAsync over logos_module_dispatch_async).
-    const bool multi = argValue(args, "--concurrency") == QStringLiteral("multi");
     QString outputDir        = argValue(args, "--output-dir");
     QString implHeader       = argValue(args, "--impl-header");
 
@@ -158,7 +154,7 @@ int main(int argc, char* argv[])
         || (fromHeader && (implClass.isEmpty() || metadata.isEmpty()))) {
         err << "Usage: logos-qt-generator (--from-header <impl.h> --impl-class <C>\n"
                "         --metadata <metadata.json> | --lidl <contract.lidl>)\n"
-               "         --backend <cdylib|ui|consumer>\n"
+               "         --backend <ui|consumer>\n"
                "         [--impl-header <include-name>] [--output-dir <dir>]\n"
                "         [--bind static|bound] [--binding api|origin]\n";
         return 1;
@@ -193,10 +189,7 @@ int main(int argc, char* argv[])
     }
 
     QList<Out> outs;
-    if (backend == "cdylib") {
-        outs.append({qs(mod.name) + "_cdylib_glue.h", lidlMakeCdylibGlueHeader(mod, multi)});
-        outs.append({qs(mod.name) + "_cdylib_glue.cpp", lidlMakeCdylibGlueSource(mod, multi)});
-    } else if (backend == "consumer") {
+    if (backend == "consumer") {
         // The Qt-typed CONSUMER wrapper — `<name>_api.{h,cpp}`, the surface a
         // module calls its dependencies through. Same file names and same
         // public signatures as the wrapper logos-cpp-generator's
@@ -255,20 +248,30 @@ int main(int argc, char* argv[])
         outs.append({depName + "_api.cpp",
                      lidlMakeQtConsumerSource(mod, depName, cls, headerRel, bindMode,
                                               bindingMode)});
-    } else if (backend == "qt") {
-        // RETIRED, and refused loudly rather than silently ignored. A build that
-        // still asks for it is asking to skip the language-neutral seam, and the
-        // replacement is a different pair of tools, not a different flag here.
-        err << "Error: --backend qt was removed. It wrapped a module impl class "
-               "directly in a Qt provider, bypassing the module-impl C ABI that "
-               "makes a module language-neutral.\n"
+    } else if (backend == "qt" || backend == "cdylib") {
+        // Both RETIRED, and refused loudly rather than silently ignored. `qt`
+        // wrapped an impl class in a Qt provider, skipping the language-neutral
+        // seam outright. `cdylib` respected the seam but emitted the HOSTING
+        // half of it, which now lives with the host in logos-plugin-qt.
+        //
+        // Neither is a flag rename, so neither can be defaulted: the work moved
+        // to a different BINARY. A caller landing here is in practice a
+        // logos-module-builder predating the repoint of cdylib codegen onto
+        // logos-qt-host-generator — say so, because the symptom otherwise
+        // surfaces as a cmake error about missing generated sources, far from
+        // the pin that actually needs moving.
+        err << "Error: --backend " << backend << " was removed from "
+               "logos-qt-generator; this tool emits the CONSUMER glue and the ui "
+               "backend, not the Qt-plugin (provider) glue.\n"
                "  Emit the C ABI:  logos-cpp-generator --lidl <c> --backend cdylib "
                "--impl-class <C> --impl-header <h>\n"
                "  Host it in Qt:   logos-qt-host-generator --lidl <c> --backend cdylib\n"
-               "logos-module-builder does both for `interface: \"universal\"`.\n";
+               "logos-module-builder does both for `interface: \"universal\"` and "
+               "`interface: \"cdylib\"`. If a BUILD produced this, that builder "
+               "predates the repoint and is the thing to update.\n";
         return 2;
     } else {
-        err << "Unknown --backend: " << backend << " (expected cdylib|ui|consumer)\n";
+        err << "Unknown --backend: " << backend << " (expected ui|consumer)\n";
         return 2;
     }
 
