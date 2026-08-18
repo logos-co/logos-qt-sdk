@@ -9,10 +9,20 @@
 //
 // Input is either --from-header <impl.h> --impl-class <C> --metadata <m.json>
 // (the contract derived from the C++ class) or --lidl <contract.lidl> (the
-// committed contract — e.g. Rust cdylib modules). Modes:
-//   --backend qt      universal C++ module glue:
-//                       <name>_qt_glue.h, <name>_dispatch.cpp,
-//                       <name>_events.cpp (when logos_events: present)
+// committed contract — e.g. Rust cdylib modules).
+//
+// There is deliberately NO backend that wraps a module implementation directly
+// in a Qt provider object. A module is a plain shared library; making one a Qt
+// plugin is a downstream HOSTING step, and it happens over the language-neutral
+// module-impl C ABI:
+//
+//   plain std impl
+//     -> logos-cpp-sdk  lidl_gen_cdylib      -> logos_module_* C ABI
+//     -> logos-plugin-qt qt-host-generator   -> <name>CdylibProvider
+//
+// The retired `--backend qt` short-circuited that seam — it consumed an impl
+// class and emitted a Qt provider for it, which is the one thing that made a
+// module NOT language-neutral. Modes:
 //   --backend cdylib  the uniform Qt glue over the module-impl C ABI:
 //                       <name>_cdylib_glue.{h,cpp}
 //                       (the C-ABI impl-exports come from logos-cpp-generator)
@@ -46,7 +56,6 @@
 
 #include "impl_header_parser.h"
 #include "lidl_emit_common.h"
-#include "lidl_gen_provider.h"
 #include "lidl_gen_cdylib_glue.h"
 #include "lidl_gen_ui.h"
 #include "lidl_gen_qt_consumer.h"
@@ -149,7 +158,7 @@ int main(int argc, char* argv[])
         || (fromHeader && (implClass.isEmpty() || metadata.isEmpty()))) {
         err << "Usage: logos-qt-generator (--from-header <impl.h> --impl-class <C>\n"
                "         --metadata <metadata.json> | --lidl <contract.lidl>)\n"
-               "         --backend <qt|cdylib|ui|consumer>\n"
+               "         --backend <cdylib|ui|consumer>\n"
                "         [--impl-header <include-name>] [--output-dir <dir>]\n"
                "         [--bind static|bound] [--binding api|origin]\n";
         return 1;
@@ -184,19 +193,7 @@ int main(int argc, char* argv[])
     }
 
     QList<Out> outs;
-    if (backend == "qt") {
-        QString typeErr;
-        if (!lidlCheckOptionalReturns(mod, &typeErr)) {
-            err << typeErr << "\n";
-            return 4;
-        }
-        outs.append({qs(mod.name) + "_qt_glue.h",
-                     lidlMakeProviderHeader(mod, implClass, implHeader)});
-        outs.append({qs(mod.name) + "_dispatch.cpp", lidlMakeProviderDispatch(mod)});
-        if (!mod.events.empty())
-            outs.append({qs(mod.name) + "_events.cpp",
-                         lidlMakeEventsSource(mod, implClass, implHeader)});
-    } else if (backend == "cdylib") {
+    if (backend == "cdylib") {
         outs.append({qs(mod.name) + "_cdylib_glue.h", lidlMakeCdylibGlueHeader(mod, multi)});
         outs.append({qs(mod.name) + "_cdylib_glue.cpp", lidlMakeCdylibGlueSource(mod, multi)});
     } else if (backend == "consumer") {
@@ -244,9 +241,8 @@ int main(int argc, char* argv[])
             err << recErr << "\n";
             return 4;
         }
-        // Same refusal as the provider path: a consumer that could CALL an
-        // optional-returning method would have no way to tell the empty answer
-        // from a failed call either.
+        // A consumer that could CALL an optional-returning method would have no
+        // way to tell the empty answer from a failed call.
         QString optErr;
         if (!lidlCheckOptionalReturns(mod, &optErr)) {
             err << optErr << "\n";
@@ -259,8 +255,20 @@ int main(int argc, char* argv[])
         outs.append({depName + "_api.cpp",
                      lidlMakeQtConsumerSource(mod, depName, cls, headerRel, bindMode,
                                               bindingMode)});
+    } else if (backend == "qt") {
+        // RETIRED, and refused loudly rather than silently ignored. A build that
+        // still asks for it is asking to skip the language-neutral seam, and the
+        // replacement is a different pair of tools, not a different flag here.
+        err << "Error: --backend qt was removed. It wrapped a module impl class "
+               "directly in a Qt provider, bypassing the module-impl C ABI that "
+               "makes a module language-neutral.\n"
+               "  Emit the C ABI:  logos-cpp-generator --lidl <c> --backend cdylib "
+               "--impl-class <C> --impl-header <h>\n"
+               "  Host it in Qt:   logos-qt-host-generator --lidl <c> --backend cdylib\n"
+               "logos-module-builder does both for `interface: \"universal\"`.\n";
+        return 2;
     } else {
-        err << "Unknown --backend: " << backend << " (expected qt|cdylib|ui|consumer)\n";
+        err << "Unknown --backend: " << backend << " (expected cdylib|ui|consumer)\n";
         return 2;
     }
 

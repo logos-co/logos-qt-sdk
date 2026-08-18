@@ -43,15 +43,6 @@ if(DEFINED EXTRA_ARGS)
   string(REPLACE "|" ";" _extra "${EXTRA_ARGS}")
   list(APPEND _args ${_extra})
 endif()
-# The qt backend names the impl class it wraps and the header it includes. BOTH
-# are required for the emitted header to be syntactically valid: without
-# --impl-class the member declaration comes out as a bare ` m_impl;` with no
-# type. Fixed values so the emitted `#include` and type name are stable across
-# machines and therefore diffable.
-if(BACKEND STREQUAL "qt")
-  list(APPEND _args --impl-class FixtureImpl --impl-header fixture_impl.h)
-endif()
-
 execute_process(
   COMMAND "${GENERATOR}" ${_args}
   RESULT_VARIABLE _rc

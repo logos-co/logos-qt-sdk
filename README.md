@@ -33,9 +33,23 @@ product; `logos-cpp-generator` keeps the Qt-free outputs):
 
 | Mode | Input | Emits |
 |------|-------|-------|
-| `--backend qt` | `--from-header` impl class | universal module glue (`_qt_glue.h`, `_dispatch.cpp`, `_events.cpp`) |
 | `--backend cdylib` | `--lidl` contract (or `--from-header`) | the uniform Qt glue over the module-impl C ABI |
+| `--backend consumer` | `--lidl` contract (or `--from-header`) | the Qt-typed CONSUMER wrapper for a dependency / interface: `<name>_api.{h,cpp}` |
 | `--backend ui` | `--metadata` + `--rep` | UI plugin glue: `*Interface.h` + `*Plugin.{h,cpp}` around the user-written `.rep` + `*Backend` class |
+
+There is deliberately **no backend that wraps a module implementation directly in
+a Qt provider object**. A module is a plain shared library; turning one into a Qt
+plugin is a downstream hosting step over the language-neutral module-impl C ABI:
+
+```
+plain std impl
+  -> logos-cpp-sdk   lidl_gen_cdylib      -> logos_module_* C ABI
+  -> logos-plugin-qt qt-host-generator    -> <name>CdylibProvider
+```
+
+`--backend qt` used to short-circuit that seam by consuming an impl class
+directly, which was the one thing that made a module *not* language-neutral. It
+was removed; asking for it now fails with a pointer to the two tools above.
 
 Both generators compile one shared LIDL frontend, distributed by
 logos-cpp-sdk under `share/lidl-frontend/`, so the parsed surface can never

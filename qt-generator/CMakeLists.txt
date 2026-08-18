@@ -26,7 +26,6 @@ endif()
 
 add_executable(logos-qt-generator
     main.cpp
-    lidl_gen_provider.cpp
     lidl_gen_cdylib_glue.cpp
     lidl_gen_ui.cpp
     lidl_gen_qt_consumer.cpp

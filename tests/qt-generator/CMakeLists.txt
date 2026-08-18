@@ -8,7 +8,10 @@
 #     The goldens are a review artifact, not a snapshot to refresh on red.
 #
 #  2. The optional paths generate, and an optional RETURN is refused with its
-#     reason on every backend that could otherwise emit one.
+#     reason on every backend that could otherwise emit one. Since `--backend
+#     qt` was retired, `consumer` is the only such backend: it is the only one
+#     that can emit a CALLER for a method whose empty answer would be
+#     indistinguishable from a failed call.
 #
 # These drive the installed generator binary rather than linking its internals,
 # because the binary is what module-builder actually invokes.
@@ -55,18 +58,14 @@ function(_qtgen_test name mode backend lidl)
 endfunction()
 
 # --- 1. back-compat: no optionals => byte-identical output -------------------
-_qtgen_test(plain_qt       golden qt       plain_module.lidl GOLDEN_DIR plain_qt)
 _qtgen_test(plain_consumer golden consumer plain_module.lidl GOLDEN_DIR plain_consumer)
 
 # --- 2. the optional paths generate at all -----------------------------------
-_qtgen_test(optional_qt       generate qt       optional_module.lidl)
 _qtgen_test(optional_consumer generate consumer optional_module.lidl)
 
 # --- 3. an optional RETURN is refused, with its reason ------------------------
 # Asserting the REASON, not just the failure: a bare non-zero exit would also be
 # satisfied by an unrelated parse error, which would quietly retire the tripwire.
-_qtgen_test(refuse_return_qt       refuse qt       refuses_optional_return.lidl
-            EXPECT_TEXT "optional RETURN")
 _qtgen_test(refuse_return_consumer refuse consumer refuses_optional_return.lidl
             EXPECT_TEXT "optional RETURN")
 

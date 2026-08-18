@@ -182,6 +182,27 @@ QString eventCbParams(const ModuleDecl& m, const EventDecl& ev)
 
 }  // namespace
 
+// ── contract gate ───────────────────────────────────────────────────────────
+
+bool lidlCheckOptionalReturns(const ModuleDecl& module, QString* error)
+{
+    for (const MethodDecl& md : module.methods) {
+        if (md.returnType.kind != TypeExpr::Optional) continue;
+        if (error) {
+            *error = QStringLiteral(
+                "%1: an optional RETURN (`-> ?T`) is not supported. An empty `?T` is "
+                "spelled JSON null on the wire, and null is already how this path "
+                "reports a FAILED call (logos_json_convert maps it to an invalid "
+                "QVariant, which core_service reports as METHOD_FAILED) — so \"found "
+                "nothing\" would be indistinguishable from \"the call failed\" for every "
+                "non-Rust caller. Take `?T` as a PARAMETER, or return a `result`.")
+                .arg(qs(md.name));
+        }
+        return false;
+    }
+    return true;
+}
+
 // ── header ──────────────────────────────────────────────────────────────────
 
 QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
