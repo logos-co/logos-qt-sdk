@@ -7,7 +7,7 @@
 # propagated input so a consumer that only asks for logos-qt-sdk still gets
 # logos-qt-host's prefix on CMAKE_PREFIX_PATH and its include dir on the
 # compiler's search path.
-{ pkgs, common, src, protocolLib, qtHost }:
+{ pkgs, common, src, protocolLib, qtHost, cppSdkInclude }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-lib";
@@ -32,7 +32,8 @@ pkgs.stdenv.mkDerivation {
     cd build-qt-sdk
     cmake ../cpp -GNinja -DCMAKE_INSTALL_PREFIX=$out \
       -DLOGOS_PROTOCOL_ROOT=${protocolLib} \
-      -DLOGOS_QT_HOST_ROOT=${qtHost} $cmakeFlags
+      -DLOGOS_QT_HOST_ROOT=${qtHost} \
+      -DLOGOS_CPP_SDK_ROOT=${cppSdkInclude} $cmakeFlags
     ninja
     cd ..
 

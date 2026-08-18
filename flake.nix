@@ -147,7 +147,7 @@
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
 
-          lib = import ./nix/lib.nix { inherit pkgs common src protocolLib qtHost; };
+          lib = import ./nix/lib.nix { inherit pkgs common src protocolLib qtHost cppSdkInclude; };
           qtGenerator = import ./nix/qt-generator.nix {
             inherit pkgs src;
             cppGeneratorBin = cppGenerator;
