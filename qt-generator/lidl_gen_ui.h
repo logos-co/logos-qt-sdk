@@ -1,7 +1,9 @@
 // UI-backend glue generation: type=ui_qml + interface=universal modules.
 //
 // USER-WRITTEN: the .rep (the view contract) and the *Backend.{h,cpp}
-// deriving <RepClass>SimpleSource + LogosModuleContext.
+// deriving <RepClass>SimpleSource + LogosUiPluginContext (this repo's
+// logos_ui_plugin_context.h — NOT logos-cpp-sdk's LogosModuleContext, which is
+// the std-typed context a core/cdylib module derives).
 // GENERATED: <name>_ui_interface.h (PluginInterface + IID) and
 // <name>_ui_glue.{h,cpp} (the *Plugin: Q_PLUGIN_METADATA + initLogos wiring
 // LogosModules/context into the backend + setBackend).

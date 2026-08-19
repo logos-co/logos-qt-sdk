@@ -15,9 +15,9 @@
 #   this prefix does not re-export them under any name: a consumer that needs
 #   LogosAPI takes logos-qt-host's include directory, which arrives through
 #   logos-qt-sdk::logos_qt_sdk's link interface. `cp cpp/*.h` below is therefore
-#   exactly this SDK's own three headers -- logos_ui_plugin_context.h,
-#   logos_qt_lp_bridge.h, logos_qt_wire.h -- and stays that way as long as
-#   cpp/ holds only what this SDK owns.
+#   exactly this SDK's own four headers -- logos_ui_plugin_context.h,
+#   logos_qt_lp_bridge.h, logos_qt_wire.h, logos_qt_host_core.h -- and stays
+#   that way as long as cpp/ holds only what this SDK owns.
 { pkgs, common, src }:
 
 pkgs.stdenv.mkDerivation {

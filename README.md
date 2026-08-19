@@ -1,22 +1,42 @@
 # logos-qt-sdk
 
 The **Qt developer layer** of the Logos SDK stack: `LogosAPI` (client cache +
-provider + token manager), `LogosAPIProvider`, the developer-facing provider
-base classes (`LogosProviderBase`, `LogosProviderPlugin`, the
-`LOGOS_PROVIDER`/`LOGOS_METHOD` macros), and the legacy `QObject`/`Q_INVOKABLE`
-provider glue (`QtProviderObject`).
+provider + token manager), `LogosAPIProvider`, the provider base classes
+(`LogosProviderBase`, `LogosProviderPlugin`, the `LOGOS_PROVIDER`/`LOGOS_METHOD`
+macros), and the legacy `QObject`/`Q_INVOKABLE` provider glue
+(`QtProviderObject`).
+
+> **None of that is how a module is WRITTEN any more.** `LogosProviderBase` and
+> the `LOGOS_METHOD` marker were the `interface: "provider"` authoring path, and
+> the generator behind them (`logos-cpp-generator --provider-header`) was
+> removed — the macros still compile, but nothing emits the
+> `callMethod`/`getMethods` dispatch `LOGOS_METHOD` used to mark. A module is
+> now `interface: "universal"`: a Qt-free impl class deriving logos-cpp-sdk's
+> `LogosModuleContext`, whose contract is DERIVED from the impl header named by
+> `codegen.impl_class` / `codegen.impl_header` — its plain public methods ARE
+> its API, with no marker. The names above survive for the legacy
+> provider-style and `Q_INVOKABLE` plugins that still load.
 
 > **That runtime does not live here.** It moved to `logos-qt-host`
 > ([`logos-plugin-qt`](https://github.com/logos-co/logos-plugin-qt)), and every
 > consumer now names that package directly. This repo keeps the surface — the
 > same `find_package(logos-qt-sdk)` and the same `logos-qt-sdk::logos_qt_sdk`
-> target — but `logos_qt_sdk` is an INTERFACE library whose only job is to link
-> `logos-qt-host::logos_qt_host`. The transitional forwarding headers that once
+> target — but `logos_qt_sdk` is an INTERFACE library: it compiles nothing, and
+> its link interface is `logos-qt-host::logos_qt_host` plus this repo's own
+> capability targets. Those are exported too, and a consumer should link the
+> narrow one it actually is rather than the umbrella:
+> `logos-qt-sdk::logos_qt_consumer` (calling other modules — the Qt↔lp seam
+> headers, deliberately NO Qt host runtime), `::logos_qt_provider`
+> (implementing a view plugin — `logos_ui_plugin_context.h`),
+> `::logos_qt_host_core` (standing up a core — Qt marshalling over
+> `logos::host::LogosCore`) and `::logos_qt_common` under all three. The
+> transitional forwarding headers that once
 > re-exported `logos_api.h` & co. from this prefix are gone; the only copy of
 > those headers in any closure is logos-qt-host's.
 >
 > What this repo still OWNS is `logos_ui_plugin_context.h`,
-> `logos_qt_lp_bridge.h`, `logos_qt_wire.h` and the `logos-qt-generator` binary.
+> `logos_qt_lp_bridge.h`, `logos_qt_wire.h`, `logos_qt_host_core.h` and the
+> `logos-qt-generator` binary.
 
 Layered over [`logos-protocol`](https://github.com/logos-co/logos-protocol)
 (transports, token exchange, consumer core, the `lp_*` C ABI). Qt-plugin and
@@ -36,7 +56,7 @@ PROVIDER-side Qt glue is not here: hosting a module in Qt is logos-plugin-qt's
 | Mode | Input | Emits |
 |------|-------|-------|
 | `--backend consumer` | `--lidl` contract (or `--from-header`) | the Qt-typed CONSUMER wrapper for a dependency / interface: `<name>_api.{h,cpp}` |
-| `--backend ui` | `--metadata` + `--rep` | UI plugin glue: `*Interface.h` + `*Plugin.{h,cpp}` around the user-written `.rep` + `*Backend` class |
+| `--backend ui` | `--metadata` + `--rep` | UI plugin glue: `<name>_ui_interface.h` (the `*Interface` + IID) + `<name>_ui_glue.{h,cpp}` (the `*Plugin`) around the user-written `.rep` + `*Backend` class |
 
 There is deliberately **no backend that wraps a module implementation directly in
 a Qt provider object**. A module is a plain shared library; turning one into a Qt
