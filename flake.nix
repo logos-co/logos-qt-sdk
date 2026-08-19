@@ -30,22 +30,12 @@
     # there — the exact split-brain the Windows single-provider work spent
     # itself closing, reintroduced through the lock file instead of the linker.
     #
-    # Pinned by rev, unlike every other input here, because the commit that
-    # introduces logos-qt-host has not reached logos-plugin-qt's master yet —
-    # an unpinned input would lock onto a master with no such package and this
-    # flake would not evaluate. The workspace pins the same rev. Drop the rev
-    # once it merges.
-    #
-    # cc24fa1 is the tip of logos-plugin-qt's feat/b4-qt-host-windows-target,
-    # rebased onto that repo's master (8846fc5 is an ancestor of it). It
-    # replaces the previous 8ccb1fc pin, which was never pushed to a branch
-    # that survives the rebase. Of the two branches carrying the qt-host work
-    # this is the SUPERSET one — feat/b4-qt-host-windows-target-8ccb1fc
-    # (989f6ae) is the same work minus the "one LogosModule.cmake" and view
-    # template commits that logos-module-builder needs. Pinning the superset
-    # here keeps a single logos-qt-host in every downstream closure.
+    # Unpinned again: feat/b4-qt-host-windows-target merged (logos-plugin-qt#19),
+    # so `logos-qt-host` is on that repo's master and an unpinned input resolves
+    # it. The three `follows` above stay — they are what keeps one logos-protocol
+    # in the closure, and that is independent of pinning.
     logos-plugin-qt = {
-      url = "github:logos-co/logos-plugin-qt/cc24fa1c0c43b2d96c1dc165ee545a0321318b59";
+      url = "github:logos-co/logos-plugin-qt";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
@@ -59,14 +49,11 @@
     # It used to also generate tests/qt-sdk's provider-dispatch fixture via
     # `logos-cpp-generator --provider-header`; that flag, and the
     # `interface: "provider"` authoring path behind it, were removed.
-    # Rev-pinned: cpp/CMakeLists.txt requires logos_host_core.h (the std host
-    # façade the Qt veneer here wraps), which arrives with 2ef1c25 — the
-    # capability split. cpp-sdk's master and its previous pin ship only the five
-    # pre-split headers, so an unpinned url fails at CONFIGURE with
-    # "logos-cpp-sdk not found ... looked for include/cpp/logos_host_core.h".
-    # Drop the rev once feat/sdk-codegen-b3-d11 merges.
+    # Unpinned again: feat/sdk-codegen-b3-d11 merged (cpp-sdk#138), so master
+    # now ships logos_host_core.h and the rest of the capability split that
+    # cpp/CMakeLists.txt requires. The rev pin existed only to bridge that gap.
     logos-cpp-sdk = {
-      url = "github:logos-co/logos-cpp-sdk/2ef1c25";
+      url = "github:logos-co/logos-cpp-sdk";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
