@@ -11,8 +11,9 @@
 //                  instanceId/persistence, no events of its own). The deps'
 //                  wrappers are Qt-typed (api-style qt), matching the .rep slots.
 //
-//   GENERATED      the *Interface.h (PluginInterface + IID) and the
-//                  *Plugin.{h,cpp} (Q_PLUGIN_METADATA, name()/version(),
+//   GENERATED      <name>_ui_interface.h (the *Interface: PluginInterface +
+//                  IID) and <name>_ui_glue.{h,cpp} (the *Plugin:
+//                  Q_PLUGIN_METADATA, name()/version(),
 //                  ViewPluginBase, and the Q_INVOKABLE initLogos that
 //                  constructs LogosModules, wires it into the backend —
 //                  firing onContextReady — and registers the backend as the

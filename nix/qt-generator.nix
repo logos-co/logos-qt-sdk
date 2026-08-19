@@ -1,5 +1,6 @@
-# Builds the logos-qt-generator binary — ALL Qt glue emission (universal
-# qt glue, the cdylib glue half, ui backend glue). Links logos-lidl for the
+# Builds the logos-qt-generator binary — the Qt CONSUMER glue and the ui
+# backend glue. (The Qt-plugin/provider half is logos-plugin-qt's
+# qt-host-generator.) Links logos-lidl for the
 # canonical frontend and compiles the shared C++/Qt backend helpers
 # distributed by logos-cpp-sdk (share/lidl-frontend) so both generators parse
 # one surface.

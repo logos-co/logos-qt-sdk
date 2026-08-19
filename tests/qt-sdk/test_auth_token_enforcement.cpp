@@ -27,7 +27,11 @@
 #include "logos_object.h"
 #include "plugin_registry.h"
 #include "local_transport.h"
-#include "../../core/interface.h"
+// By name, not by a path relative to this file: core/interface.h moved to
+// logos-qt-host with the runtime it hands out, so there is nothing at
+// ../../core/ any more. It resolves through logos-qt-host's include directory,
+// which arrives with the logos_qt_sdk target.
+#include <core/interface.h>
 
 // ── New-API provider (LogosProviderBase) ────────────────────────────────────
 class AuthTestProvider : public LogosProviderBase {

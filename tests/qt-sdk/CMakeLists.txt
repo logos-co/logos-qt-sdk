@@ -1,24 +1,10 @@
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Test)
 
-# logos-cpp-generator (a build-time tool from logos-cpp-sdk) generates the
-# provider-dispatch fixture exercised by test_provider_dispatch.
-find_program(LOGOS_CPP_GENERATOR logos-cpp-generator REQUIRED)
-
-set(SAMPLE_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample_provider.h)
-set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
-set(GENERATED_DISPATCH ${GENERATED_DIR}/logos_provider_dispatch.cpp)
-
-file(MAKE_DIRECTORY ${GENERATED_DIR})
-
-add_custom_command(
-    OUTPUT ${GENERATED_DISPATCH}
-    COMMAND ${LOGOS_CPP_GENERATOR} --provider-header ${SAMPLE_HEADER} --output-dir ${GENERATED_DIR}
-    DEPENDS ${SAMPLE_HEADER}
-    COMMENT "Generating provider dispatch for sample_provider"
-)
-
 add_executable(qt_sdk_tests
     test_main.cpp
+    # The HOST capability's Qt marshalling layer. Only the std <-> Qt edge is
+    # tested here; the substance lives in logos-cpp-sdk's test_logos_host_core.
+    test_qt_host_core.cpp
     # Argument decoding for a Qt-typed provider — moved here with the decoder
     # itself, which logos-protocol hosted but never used.
     test_qt_arg_decode.cpp
@@ -36,24 +22,24 @@ add_executable(qt_sdk_tests
     test_worker_thread_ipc.cpp
     test_event_system.cpp
     test_async_calls.cpp
-    test_provider_dispatch.cpp
-    # Provider-side ARGUMENT decoding (registry entry Q1) for both Qt provider
-    # sites — the generated dispatch and the QMetaObject one. Carries the four
-    # typed-array cases the logoscore CLI cannot express as arguments.
+    # Provider-side ARGUMENT decoding (registry entry Q1) for the QMetaObject
+    # provider site, plus the pure logos::qtArgFromVariant<T> converter every
+    # generated dispatch is built from. Carries the four typed-array cases the
+    # logoscore CLI cannot express as arguments.
     test_provider_arg_validation.cpp
     test_std_string_overloads.cpp
     # The Qt <-> canonical-JSON edge the generated Qt consumer wrapper is built
     # from (logos_qt_wire.h). One round-trip per surface type, so the generator
     # can emit one pair of calls everywhere instead of a table per direction.
     test_qt_wire.cpp
-    fixtures/sample_provider.cpp
-    ${GENERATED_DISPATCH}
+    # The other half of that seam: which (origin, target) pair a generated
+    # wrapper's transport is keyed by, and that a STATED origin is never
+    # collapsed into a derived one.
+    test_qt_lp_bridge_origin.cpp
 )
 
 target_include_directories(qt_sdk_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
-    ${GENERATED_DIR}
 )
 
 target_link_libraries(qt_sdk_tests PRIVATE

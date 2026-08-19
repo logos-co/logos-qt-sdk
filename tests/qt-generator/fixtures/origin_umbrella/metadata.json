@@ -1,0 +1,10 @@
+{
+  "name": "origin_probe_module",
+  "version": "1.0.0",
+  "type": "core",
+  "interface": "universal",
+  "dependencies": ["plain_module"],
+  "interface_dependencies": [
+    { "name": "optional_module", "file": "../optional_module.lidl" }
+  ]
+}

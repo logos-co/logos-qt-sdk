@@ -1,7 +1,23 @@
-# Installs the logos-qt-sdk headers AND sources in the source-export layout
-# ($out/include/cpp/...), mirroring logos-cpp-sdk's historical shipping
-# shape so build systems that compile SDK sources directly (source-layout
-# plugin builds) keep working.
+# Installs logos-qt-sdk's OWN headers in the source-export layout
+# ($out/include/cpp/...), mirroring logos-cpp-sdk's historical shipping shape so
+# build systems that add that directory to the include path keep working.
+#
+# What this no longer ships, and why:
+#
+#   The five .cpp files. They were here for the "source layout" branches in
+#   logos-module-builder / logos-test-framework / logos-basecamp, which compile
+#   the Qt developer layer straight into the consumer instead of linking it.
+#   Those sources are logos-qt-host's now, and every one of those branches is
+#   guarded by LOGOS_QT_SDK_IS_SOURCE, which is FALSE for an installed prefix --
+#   i.e. false for every Nix build, which is all of them.
+#
+#   The five moved headers and core/interface.h. They are logos-qt-host's, and
+#   this prefix does not re-export them under any name: a consumer that needs
+#   LogosAPI takes logos-qt-host's include directory, which arrives through
+#   logos-qt-sdk::logos_qt_sdk's link interface. `cp cpp/*.h` below is therefore
+#   exactly this SDK's own four headers -- logos_ui_plugin_context.h,
+#   logos_qt_lp_bridge.h, logos_qt_wire.h, logos_qt_host_core.h -- and stays
+#   that way as long as cpp/ holds only what this SDK owns.
 { pkgs, common, src }:
 
 pkgs.stdenv.mkDerivation {
@@ -22,11 +38,7 @@ pkgs.stdenv.mkDerivation {
     runHook preInstall
 
     mkdir -p $out/include/cpp
-    mkdir -p $out/include/core
-    for file in cpp/*.h cpp/*.cpp; do
-      cp "$file" $out/include/cpp/
-    done
-    cp core/interface.h $out/include/core/
+    cp cpp/*.h $out/include/cpp/
 
     runHook postInstall
   '';

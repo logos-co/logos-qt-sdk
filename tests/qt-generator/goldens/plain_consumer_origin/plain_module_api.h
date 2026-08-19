@@ -8,8 +8,7 @@
 #include <functional>
 #include <utility>
 #include "logos_types.h"
-#include "logos_api.h"
-#include "logos_api_client.h"
+#include "logos_mode.h"
 #include "logos_call_error.h"
 #include "logos_async_result.h"
 #include "logos_object.h"
@@ -24,7 +23,7 @@ public:
         double y{};
     };
 
-    explicit PlainModule(LogosAPI* api);
+    explicit PlainModule(const QString& origin);
 
     using RawEventCallback = std::function<void(const QString&, const QVariantList&)>;
     using EventCallback = std::function<void(const QVariantList&)>;
@@ -77,7 +76,6 @@ public:
     void resetAsyncResult(std::function<void(logos::AsyncResult<void>)> callback, Timeout timeout = Timeout());
 
 private:
-    LogosAPI* m_api;
     QString m_moduleName;
     logos::qt::LpBridge* m_bridge;
 };

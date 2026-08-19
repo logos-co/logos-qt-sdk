@@ -1,5 +1,5 @@
-; TRIPWIRE FIXTURE. Generating from this MUST fail, on both the qt and the
-; consumer backend, with a message naming the reason.
+; TRIPWIRE FIXTURE. Generating from this MUST fail, on the consumer backend,
+; with a message naming the reason.
 ;
 ; It goes green — i.e. the generator starts accepting it — only when someone
 ; teaches the host path to tell an empty optional apart from a failed call.

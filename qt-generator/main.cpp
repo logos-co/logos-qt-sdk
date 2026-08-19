@@ -1,21 +1,31 @@
 // logos-qt-generator — ALL Qt glue emission for Logos modules.
 //
 // The Qt-confinement invariant puts generated Qt code in the Qt layer: this
-// tool (hosted by logos-qt-sdk) emits the Qt-plugin glue for every module
-// flavor, while logos-cpp-sdk's logos-cpp-generator keeps the Qt-free
+// tool (hosted by logos-qt-sdk) emits the Qt CONSUMER glue and the ui plugin
+// backend, while logos-cpp-sdk's logos-cpp-generator keeps the Qt-free
 // outputs (std typed wrappers, the logos_sdk umbrella, cdylib impl-exports,
 // LIDL derivation). Both tools share one LIDL frontend: the sources under
 // logos-cpp-sdk's share/lidl-frontend/, compiled into this binary.
 //
 // Input is either --from-header <impl.h> --impl-class <C> --metadata <m.json>
 // (the contract derived from the C++ class) or --lidl <contract.lidl> (the
-// committed contract — e.g. Rust cdylib modules). Modes:
-//   --backend qt      universal C++ module glue:
-//                       <name>_qt_glue.h, <name>_dispatch.cpp,
-//                       <name>_events.cpp (when logos_events: present)
-//   --backend cdylib  the uniform Qt glue over the module-impl C ABI:
-//                       <name>_cdylib_glue.{h,cpp}
-//                       (the C-ABI impl-exports come from logos-cpp-generator)
+// committed contract — e.g. Rust cdylib modules).
+//
+// There is deliberately NO backend that wraps a module implementation directly
+// in a Qt provider object. A module is a plain shared library; making one a Qt
+// plugin is a downstream HOSTING step, and it happens over the language-neutral
+// module-impl C ABI:
+//
+//   plain std impl
+//     -> logos-cpp-sdk  lidl_gen_cdylib      -> logos_module_* C ABI
+//     -> logos-plugin-qt qt-host-generator   -> <name>CdylibProvider
+//
+// The retired `--backend qt` short-circuited that seam — it consumed an impl
+// class and emitted a Qt provider for it, which is the one thing that made a
+// module NOT language-neutral. `--backend cdylib` is retired too, for a
+// narrower reason: what it emitted was the HOSTING half — Qt glue over the C
+// ABI — and that half belongs with the host, so it lives in logos-plugin-qt's
+// qt-host-generator now. What remains here is the CONSUMER half plus ui. Modes:
 //   --backend consumer  the Qt-TYPED CONSUMER wrapper for a dependency /
 //                       interface: <name>_api.{h,cpp}. Same public surface the
 //                       legacy Qt wrapper had; the bodies convert at the edge
@@ -23,6 +33,12 @@
 //                       one codec and one Qt type mapper under both consumer
 //                       surfaces instead of two parallel implementations.
 //                       [--module <dep-name>] [--class <C>] [--bind static|bound]
+//                       [--binding api|origin]
+//                       --bind picks the call TARGET (baked vs runtime);
+//                       --binding picks the call ORIGIN: `api` (default) keeps
+//                       the LogosAPI-taking constructor, `origin` emits a
+//                       wrapper with NO LogosAPI that is handed the consuming
+//                       module's own name instead.
 //   --backend ui      UI plugin backend (type=ui_qml + interface=universal):
 //                       --metadata <m.json> --rep <view.rep>
 //                       [--backend-class C] [--backend-header h]
@@ -40,8 +56,6 @@
 
 #include "impl_header_parser.h"
 #include "lidl_emit_common.h"
-#include "lidl_gen_provider.h"
-#include "lidl_gen_cdylib_glue.h"
 #include "lidl_gen_ui.h"
 #include "lidl_gen_qt_consumer.h"
 
@@ -85,9 +99,6 @@ int main(int argc, char* argv[])
     const QString implClass  = argValue(args, "--impl-class");
     const QString metadata   = argValue(args, "--metadata");
     const QString backend    = argValue(args, "--backend");
-    // concurrency:"multi" (from metadata.json, fed by the builder) ⇒ also emit the
-    // concurrent-dispatch glue (callMethodAsync over logos_module_dispatch_async).
-    const bool multi = argValue(args, "--concurrency") == QStringLiteral("multi");
     QString outputDir        = argValue(args, "--output-dir");
     QString implHeader       = argValue(args, "--impl-header");
 
@@ -143,8 +154,9 @@ int main(int argc, char* argv[])
         || (fromHeader && (implClass.isEmpty() || metadata.isEmpty()))) {
         err << "Usage: logos-qt-generator (--from-header <impl.h> --impl-class <C>\n"
                "         --metadata <metadata.json> | --lidl <contract.lidl>)\n"
-               "         --backend <qt|cdylib|ui|consumer>\n"
-               "         [--impl-header <include-name>] [--output-dir <dir>]\n";
+               "         --backend <ui|consumer>\n"
+               "         [--impl-header <include-name>] [--output-dir <dir>]\n"
+               "         [--bind static|bound] [--binding api|origin]\n";
         return 1;
     }
     if (implHeader.isEmpty() && fromHeader)
@@ -177,22 +189,7 @@ int main(int argc, char* argv[])
     }
 
     QList<Out> outs;
-    if (backend == "qt") {
-        QString typeErr;
-        if (!lidlCheckOptionalReturns(mod, &typeErr)) {
-            err << typeErr << "\n";
-            return 4;
-        }
-        outs.append({qs(mod.name) + "_qt_glue.h",
-                     lidlMakeProviderHeader(mod, implClass, implHeader)});
-        outs.append({qs(mod.name) + "_dispatch.cpp", lidlMakeProviderDispatch(mod)});
-        if (!mod.events.empty())
-            outs.append({qs(mod.name) + "_events.cpp",
-                         lidlMakeEventsSource(mod, implClass, implHeader)});
-    } else if (backend == "cdylib") {
-        outs.append({qs(mod.name) + "_cdylib_glue.h", lidlMakeCdylibGlueHeader(mod, multi)});
-        outs.append({qs(mod.name) + "_cdylib_glue.cpp", lidlMakeCdylibGlueSource(mod, multi)});
-    } else if (backend == "consumer") {
+    if (backend == "consumer") {
         // The Qt-typed CONSUMER wrapper — `<name>_api.{h,cpp}`, the surface a
         // module calls its dependencies through. Same file names and same
         // public signatures as the wrapper logos-cpp-generator's
@@ -213,14 +210,32 @@ int main(int argc, char* argv[])
         const QtConsumerBind bindMode =
             (bindArg == "bound") ? QtConsumerBind::Bound : QtConsumerBind::Static;
 
+        // --binding api|origin. A separate axis from --bind: that one names the
+        // call TARGET, this one names the call ORIGIN. `origin` emits the
+        // LogosAPI-free wrapper whose constructor is handed the consuming
+        // module's own name — the surface a cdylib module (no LogosAPI
+        // anywhere) needs in order to hold Qt-typed dependency wrappers.
+        //
+        // An unrecognised value is REFUSED rather than defaulted: defaulting a
+        // misspelt `--binding orgin` back to the LogosAPI form would emit a
+        // wrapper the caller's umbrella cannot construct, and the failure would
+        // land in generated code far from the typo.
+        const QString bindingArg = argValue(args, "--binding");
+        if (!bindingArg.isEmpty() && bindingArg != "api" && bindingArg != "origin") {
+            err << "Unknown --binding: " << bindingArg << " (expected api|origin)\n";
+            return 2;
+        }
+        const QtConsumerBinding bindingMode = (bindingArg == "origin")
+                                                  ? QtConsumerBinding::ExplicitOrigin
+                                                  : QtConsumerBinding::FromApi;
+
         QString recErr;
         if (!lidlCheckRecords(mod, &recErr)) {
             err << recErr << "\n";
             return 4;
         }
-        // Same refusal as the provider path: a consumer that could CALL an
-        // optional-returning method would have no way to tell the empty answer
-        // from a failed call either.
+        // A consumer that could CALL an optional-returning method would have no
+        // way to tell the empty answer from a failed call.
         QString optErr;
         if (!lidlCheckOptionalReturns(mod, &optErr)) {
             err << optErr << "\n";
@@ -228,11 +243,35 @@ int main(int argc, char* argv[])
         }
 
         const QString headerRel = depName + "_api.h";
-        outs.append({headerRel, lidlMakeQtConsumerHeader(mod, depName, cls, bindMode)});
+        outs.append({headerRel,
+                     lidlMakeQtConsumerHeader(mod, depName, cls, bindMode, bindingMode)});
         outs.append({depName + "_api.cpp",
-                     lidlMakeQtConsumerSource(mod, depName, cls, headerRel, bindMode)});
+                     lidlMakeQtConsumerSource(mod, depName, cls, headerRel, bindMode,
+                                              bindingMode)});
+    } else if (backend == "qt" || backend == "cdylib") {
+        // Both RETIRED, and refused loudly rather than silently ignored. `qt`
+        // wrapped an impl class in a Qt provider, skipping the language-neutral
+        // seam outright. `cdylib` respected the seam but emitted the HOSTING
+        // half of it, which now lives with the host in logos-plugin-qt.
+        //
+        // Neither is a flag rename, so neither can be defaulted: the work moved
+        // to a different BINARY. A caller landing here is in practice a
+        // logos-module-builder predating the repoint of cdylib codegen onto
+        // logos-qt-host-generator — say so, because the symptom otherwise
+        // surfaces as a cmake error about missing generated sources, far from
+        // the pin that actually needs moving.
+        err << "Error: --backend " << backend << " was removed from "
+               "logos-qt-generator; this tool emits the CONSUMER glue and the ui "
+               "backend, not the Qt-plugin (provider) glue.\n"
+               "  Emit the C ABI:  logos-cpp-generator --lidl <c> --backend cdylib "
+               "--impl-class <C> --impl-header <h>\n"
+               "  Host it in Qt:   logos-qt-host-generator --lidl <c> --backend cdylib\n"
+               "logos-module-builder does both for `interface: \"universal\"` and "
+               "`interface: \"cdylib\"`. If a BUILD produced this, that builder "
+               "predates the repoint and is the thing to update.\n";
+        return 2;
     } else {
-        err << "Unknown --backend: " << backend << " (expected qt|cdylib|ui|consumer)\n";
+        err << "Unknown --backend: " << backend << " (expected ui|consumer)\n";
         return 2;
     }
 

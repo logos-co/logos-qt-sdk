@@ -44,10 +44,9 @@ static PlainModule::Point recFromWire_Point(const nlohmann::json& w) {
     return __out;
 }
 
-PlainModule::PlainModule(LogosAPI* api)
-    : m_api(api),
-      m_moduleName(QStringLiteral("plain_module")),
-      m_bridge(logos::qt::LpBridge::forTarget(api, QStringLiteral("plain_module"))) {}
+PlainModule::PlainModule(const QString& origin)
+    : m_moduleName(QStringLiteral("plain_module")),
+      m_bridge(logos::qt::LpBridge::forOrigin(origin, QStringLiteral("plain_module"))) {}
 
 bool PlainModule::on(const QString& eventName, RawEventCallback callback) {
     if (!callback) {

@@ -14,6 +14,22 @@
 #
 # Required: GENERATOR, LIDL, BACKEND, OUT_DIR. Golden mode also needs GOLDEN_DIR;
 # refuse mode also needs EXPECT_TEXT.
+#
+# Optional everywhere. All three are '|'-separated lists rather than CMake
+# ';'-lists, because a ';' inside an add_test() argument is spliced into extra
+# argv entries before this script ever sees it (see the CMakeLists comment):
+#   EXTRA_ARGS    appended to the generator's argv, for the flags that select a
+#                 backend FLAVOUR (--bind, --binding).
+#   REQUIRE_TEXT  every entry must appear in the concatenated output
+#                 files. Not redundant with the goldens: a golden says "this
+#                 exact text", which is unreadable as an assertion about ONE
+#                 property, and it is refreshed as a unit. REQUIRE/FORBID name
+#                 the property, so a reviewer can see which line of a diff was
+#                 load-bearing.
+#   FORBID_TEXT   no entry may appear in any generated file. This is
+#                 how "the emitted wrapper holds no LogosAPI" is asserted:
+#                 stated as an absence, which no golden refresh can quietly
+#                 restore.
 
 if(NOT DEFINED GENERATOR OR NOT DEFINED LIDL OR NOT DEFINED BACKEND OR NOT DEFINED OUT_DIR)
   message(FATAL_ERROR "run_generator.cmake: GENERATOR, LIDL, BACKEND and OUT_DIR are required")
@@ -23,15 +39,10 @@ file(REMOVE_RECURSE "${OUT_DIR}")
 file(MAKE_DIRECTORY "${OUT_DIR}")
 
 set(_args --lidl "${LIDL}" --backend "${BACKEND}" --output-dir "${OUT_DIR}")
-# The qt backend names the impl class it wraps and the header it includes. BOTH
-# are required for the emitted header to be syntactically valid: without
-# --impl-class the member declaration comes out as a bare ` m_impl;` with no
-# type. Fixed values so the emitted `#include` and type name are stable across
-# machines and therefore diffable.
-if(BACKEND STREQUAL "qt")
-  list(APPEND _args --impl-class FixtureImpl --impl-header fixture_impl.h)
+if(DEFINED EXTRA_ARGS)
+  string(REPLACE "|" ";" _extra "${EXTRA_ARGS}")
+  list(APPEND _args ${_extra})
 endif()
-
 execute_process(
   COMMAND "${GENERATOR}" ${_args}
   RESULT_VARIABLE _rc
@@ -57,6 +68,41 @@ endif()
 
 if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "generator failed on ${LIDL} (--backend ${BACKEND}):\n${_err}")
+endif()
+
+# Text properties of the emitted files. Run before the golden comparison so a
+# named property fails with its own message rather than as one line of a diff.
+if(DEFINED REQUIRE_TEXT OR DEFINED FORBID_TEXT)
+  file(GLOB _emitted "${OUT_DIR}/*")
+  if(NOT _emitted)
+    message(FATAL_ERROR "the generator wrote nothing to ${OUT_DIR}")
+  endif()
+  set(_all "")
+  foreach(_e IN LISTS _emitted)
+    file(READ "${_e}" _c)
+    string(APPEND _all "${_c}")
+  endforeach()
+  string(REPLACE "|" ";" _require "${REQUIRE_TEXT}")
+  string(REPLACE "|" ";" _forbid  "${FORBID_TEXT}")
+  foreach(_needle IN LISTS _require)
+    string(FIND "${_all}" "${_needle}" _pos)
+    if(_pos EQUAL -1)
+      message(FATAL_ERROR
+        "the emitted ${BACKEND} output does not contain the required text.\n"
+        "expected: ${_needle}\nin: ${_emitted}")
+    endif()
+  endforeach()
+  foreach(_needle IN LISTS _forbid)
+    foreach(_e IN LISTS _emitted)
+      file(READ "${_e}" _c)
+      string(FIND "${_c}" "${_needle}" _pos)
+      if(NOT _pos EQUAL -1)
+        message(FATAL_ERROR
+          "the emitted ${BACKEND} output must NOT contain '${_needle}', "
+          "but ${_e} does.")
+      endif()
+    endforeach()
+  endforeach()
 endif()
 
 if(NOT MODE STREQUAL "golden")
