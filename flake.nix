@@ -101,18 +101,14 @@
             inherit protocolLib;
             lidlPkg = logos-lidl.packages.${system}.logos-lidl;
 
-            # The Qt host runtime. logos-plugin-qt publishes it for the unix
-            # systems only, so the Windows target builds the same sources here
-            # instead — see nix/qt-host-windows.nix for why that is a duplicated
-            # recipe and not a duplicated archive.
-            qtHost =
-              if isWin
-              then import ./nix/qt-host-windows.nix {
-                inherit pkgs protocolLib;
-                common = import ./nix/default.nix { inherit pkgs; };
-                pluginQtSrc = logos-plugin-qt;
-              }
-              else logos-plugin-qt.packages.${system}.logos-qt-host;
+            # The Qt host runtime, taken from logos-plugin-qt for EVERY target
+            # including Windows. That repo keys `packages` by forAllTargets, so
+            # packages.x86_64-windows.logos-qt-host is a real mingw build there.
+            # This flake used to carry nix/qt-host-windows.nix, a second recipe
+            # over the same sources, because plugin-qt published the unix systems
+            # only; logos-plugin-qt#19 added the Windows target and that file
+            # said to delete it the moment it did.
+            qtHost = logos-plugin-qt.packages.${system}.logos-qt-host;
 
             # HOST TOOL: the code generator is executed during the build, so it
             # must be a native binary for the machine doing the building. Taking
