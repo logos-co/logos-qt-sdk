@@ -78,8 +78,11 @@ inline QVariantMap toQVariantMap(const host::ModuleStats& s)
     QVariantMap m;
     // The modelled fields, named as the struct names them.
     m.insert(QStringLiteral("name"),        QString::fromStdString(s.name));
-    m.insert(QStringLiteral("cpuPercent"),  s.cpuPercent);
-    m.insert(QStringLiteral("memoryBytes"), static_cast<qlonglong>(s.memoryBytes));
+    m.insert(QStringLiteral("cpuPercent"),     s.cpuPercent);
+    m.insert(QStringLiteral("cpuTimeSeconds"), s.cpuTimeSeconds);
+    // MEGABYTES. This was `memoryBytes` as a qlonglong, mirroring a struct
+    // member that both misnamed the unit and read a JSON key nothing emits.
+    m.insert(QStringLiteral("memoryMb"),       s.memoryMb);
     // Plus every raw key, so a consumer sees fields added to liblogos' stats
     // JSON without waiting for this header to grow them. Modelled keys above
     // win on collision, since they are the documented spelling.

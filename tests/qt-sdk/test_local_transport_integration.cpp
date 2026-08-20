@@ -176,7 +176,9 @@ TEST_F(LocalTransportIntegrationTest, GetMethodsDelegatesToProvider)
     ASSERT_NE(obj, nullptr);
 
     QJsonArray methods = obj->getMethods();
-    EXPECT_EQ(methods.size(), 2);
+    // The provider's method and event, plus the name()/version() identity pair
+    // the proxy injects since logos-protocol#61.
+    EXPECT_EQ(methods.size(), 4);
     obj->release();
 }
 
