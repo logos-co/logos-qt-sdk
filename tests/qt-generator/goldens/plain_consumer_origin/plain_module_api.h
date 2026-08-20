@@ -74,6 +74,12 @@ public:
     void reset(logos::CallError* err = nullptr, Timeout timeout = Timeout());
     void resetAsync(std::function<void()> callback, Timeout timeout = Timeout());
     void resetAsyncResult(std::function<void(logos::AsyncResult<void>)> callback, Timeout timeout = Timeout());
+    QString name(logos::CallError* err = nullptr, Timeout timeout = Timeout());
+    void nameAsync(std::function<void(QString)> callback, Timeout timeout = Timeout());
+    void nameAsyncResult(std::function<void(logos::AsyncResult<QString>)> callback, Timeout timeout = Timeout());
+    QString version(logos::CallError* err = nullptr, Timeout timeout = Timeout());
+    void versionAsync(std::function<void(QString)> callback, Timeout timeout = Timeout());
+    void versionAsyncResult(std::function<void(logos::AsyncResult<QString>)> callback, Timeout timeout = Timeout());
 
 private:
     QString m_moduleName;

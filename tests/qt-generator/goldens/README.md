@@ -70,3 +70,9 @@ binding, so a module can change how it binds without any call site moving.
 
 `plain_consumer` was unchanged by that work, and must stay so — the
 LogosAPI-taking path is additive-only.
+
+Refreshed for the derived module identity methods (`name()` / `version()`).
+Both goldens grew by exactly the same 68 source lines and 6 header lines —
+the two methods with their three standard overloads each, appended — and
+nothing already there changed. Pure addition, zero deletions, which is what a
+contract gaining two methods should look like here.

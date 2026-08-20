@@ -188,6 +188,18 @@ int main(int argc, char* argv[])
         mod = pr.module;
     }
 
+    {
+        // Every module answers name()/version(), so every consumer wrapper
+        // offers them. Added here rather than read from the contract: the
+        // .lidl carries only what the author wrote, and the provider adds the
+        // same two methods from the same frontend function.
+        QString idErr;
+        if (!lidlInjectIdentity(mod, &idErr)) {
+            err << (fromHeader ? headerPath : lidlPath) << ": " << idErr << "\n";
+            return 4;
+        }
+    }
+
     QList<Out> outs;
     if (backend == "consumer") {
         // The Qt-typed CONSUMER wrapper — `<name>_api.{h,cpp}`, the surface a
