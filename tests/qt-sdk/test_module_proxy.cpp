@@ -7,6 +7,18 @@
 #include "logos_provider_object.h"
 #include "module_proxy.h"
 
+// Since logos-protocol#61 the proxy ADDITIVELY advertises name()/version() for
+// a provider that does not list them itself, so an interface is the provider's
+// own entries PLUS that identity pair. Assert membership by name rather than a
+// bare count: a bare count turns the next additive change into a mystery
+// number, which is exactly how these four assertions went stale.
+static bool hasNamed(const QJsonArray& arr, const QString& name)
+{
+    for (const QJsonValue& v : arr)
+        if (v.toObject().value("name").toString() == name) return true;
+    return false;
+}
+
 // Minimal provider for proxy testing
 class ProxyTestProvider : public LogosProviderBase {
 public:
@@ -80,8 +92,11 @@ TEST_F(ModuleProxyTest, GetPluginMethodsDispatchesToProvider)
     // getPluginMethods() returns the method-typed entries only — the event the
     // provider also reports through getMethods() is filtered out.
     QJsonArray methods = proxy.getPluginMethods();
-    ASSERT_EQ(methods.size(), 1);
-    EXPECT_EQ(methods[0].toObject()["name"].toString(), "testMethod");
+    EXPECT_TRUE(hasNamed(methods, "testMethod"));   // the provider's own
+    EXPECT_TRUE(hasNamed(methods, "name"));         // injected identity pair
+    EXPECT_TRUE(hasNamed(methods, "version"));
+    EXPECT_FALSE(hasNamed(methods, "testEvent"));   // events still filtered out
+    EXPECT_EQ(methods.size(), 3);
 }
 
 TEST_F(ModuleProxyTest, GetPluginEventsReturnsOnlyEvents)
@@ -95,8 +110,14 @@ TEST_F(ModuleProxyTest, GetPluginEventsReturnsOnlyEvents)
 TEST_F(ModuleProxyTest, GetPluginInterfaceReturnsMethodsAndEvents)
 {
     ModuleProxy proxy(m_provider);
-    // The whole interface — both the method and the event — in one array.
-    EXPECT_EQ(proxy.getPluginInterface().size(), 2);
+    // The whole interface — the provider's method and event, plus the
+    // injected name()/version() identity pair.
+    QJsonArray iface = proxy.getPluginInterface();
+    EXPECT_TRUE(hasNamed(iface, "testMethod"));
+    EXPECT_TRUE(hasNamed(iface, "testEvent"));
+    EXPECT_TRUE(hasNamed(iface, "name"));
+    EXPECT_TRUE(hasNamed(iface, "version"));
+    EXPECT_EQ(iface.size(), 4);
 }
 
 TEST_F(ModuleProxyTest, GetPluginMethodsSpecialCaseInCallRemoteMethod)
@@ -117,7 +138,8 @@ TEST_F(ModuleProxyTest, GetPluginEventsAndInterfaceSpecialCaseInCallRemoteMethod
     EXPECT_EQ(ev.toJsonArray().size(), 1);
 
     QVariant iface = proxy.callRemoteMethod("token", "getPluginInterface");
-    EXPECT_EQ(iface.toJsonArray().size(), 2);
+    // provider's method + event, plus the injected name()/version() pair.
+    EXPECT_EQ(iface.toJsonArray().size(), 4);
 
     // Both are intercepted by the proxy, never dispatched to the provider.
     EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty());
