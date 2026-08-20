@@ -91,48 +91,25 @@ public:
     // The error-carrying async: `cb` fires exactly once with the result JSON
     // AND the call error.
     //
-    // It deliberately does NOT go through m_client, and that is the only reason
-    // it is written out here rather than being one more forward. logos::LpClient
-    // (logos-cpp-sdk) has no error-carrying async to borrow: its result
-    // trampoline collapses the C ABI's failure form — `ok == 0` with `json` set
-    // to the canonical {code, message, origin} object — into a bare JSON null,
-    // which is also what a successful call returning nothing delivers. A
-    // `<name>AsyncResult` built on that would report ok() for a call to a module
-    // that is NOT LOADED, i.e. exactly the "error channel that lies" the cpp
-    // generator refused to emit over this transport back when lp_invoke_async
-    // itself hard-coded ok = 1. The transport reports it properly now (it binds
-    // LogosAPIClient's CallError-aware overload); only the C++ wrapper in front
-    // of it still drops it, so this goes straight to the C ABI.
+    // A straight forward to logos::LpClient, as it always should have been.
+    // This used to be written out here over a SECOND, privately-owned
+    // lp_client, because LpClient had no error-carrying async to borrow: its
+    // result trampoline collapsed the C ABI's failure form — `ok == 0` with
+    // `json` set to the canonical {code, message, origin} object — into a bare
+    // JSON null, which is also what a successful call returning nothing
+    // delivers. logos-cpp-sdk#142 added LpClient::invokeAsyncResult with
+    // byte-identical decoding, so the duplicate is gone, and with it the second
+    // connection per (origin, target) pair and the deliberate leak that came
+    // with it — that client was created on first use and never destroyed.
     //
-    // The cost is the second client below. A logos::LpClient::invokeAsync
-    // overload taking std::function<void(nlohmann::json, const CallError&)>
-    // retires this whole member, its trampoline and that second connection.
+    // syncTokens() still runs first: client() does it, exactly as the retired
+    // private accessor did.
     void invokeAsyncResult(const std::string& method,
                            const nlohmann::json& args,
                            std::function<void(nlohmann::json, const logos::CallError&)> cb,
                            int timeoutMs)
     {
-        lp_client* c = resultClient();
-        if (!c) {
-            cb(nlohmann::json(),
-               logos::callErrorObjectUnavailable(m_target,
-                                                 "could not create client for " + m_target));
-            return;
-        }
-        auto* box = new ResultBox(std::move(cb));
-        const std::string argsStr = args.dump();
-        const int rc = lp_invoke_async(c, method.c_str(), argsStr.c_str(), timeoutMs,
-                                       &LpBridge::resultTrampoline, box);
-        if (rc != LP_OK) {
-            // The C ABI documents that a synchronous LP_ERR_INVALID_ARG does
-            // NOT call back, so the completion is this function's to make —
-            // the callback still has to fire exactly once.
-            ResultBox fn = std::move(*box);
-            delete box;
-            fn(nlohmann::json(),
-               logos::callErrorCallFailed(m_target, "lp_invoke_async refused the call (rc="
-                                                        + std::to_string(rc) + ")"));
-        }
+        client().invokeAsyncResult(method, args, std::move(cb), timeoutMs);
     }
 
     // Keep an lp subscription alive for the process, mirroring the Qt
@@ -221,71 +198,9 @@ private:
         return it->second.get();
     }
 
-    using ResultBox = std::function<void(nlohmann::json, const logos::CallError&)>;
-
     LpBridge(LogosAPI* api, SyncFn sync, std::string target, std::string origin)
         : m_api(api), m_sync(sync), m_target(std::move(target)),
           m_origin(std::move(origin)), m_client(m_target, m_origin) {}
-
-    // The client invokeAsyncResult calls the C ABI on, created on first use and
-    // never destroyed — same lifetime as m_client, and destroying it is what
-    // would make a late callback a use-after-free.
-    //
-    // A SECOND connection to the same target for a wrapper that uses both async
-    // flavours, which is the price of not being able to reach m_client's
-    // lp_client (logos::LpClient owns it privately, as it must to destroy it).
-    // It is a second transport, not a second behaviour: same target, same
-    // origin, same process-default transport config, same token flow — tokens
-    // live in the process-wide TokenManager, so the second client reuses
-    // whatever the first one already minted.
-    // Constructed under its OWN once_flag rather than under m_mutex, and that
-    // is load-bearing rather than a style choice. On the QtRO transport —
-    // the default inside a module process — lp_client_create ends in
-    // runOnQtMainThread, i.e. a Qt::BlockingQueuedConnection when called off
-    // the main thread. Holding m_mutex across that would let a worker thread
-    // sit on the mutex waiting for the main thread while the main thread sits
-    // in keep() — reached by every generated on<Event> subscription — waiting
-    // for the same mutex. Neither ever runs the queued construction.
-    //
-    // m_subs is the only thing m_mutex protects; giving the lazy client a
-    // separate flag means the two can never contend.
-    lp_client* resultClient()
-    {
-        syncTokens();
-        std::call_once(m_resultClientOnce, [this] {
-            m_resultClient = lp_client_create(m_target.c_str(), m_origin.c_str(),
-                                              nullptr, nullptr);
-        });
-        return m_resultClient;
-    }
-
-    // ok == 0 means `json` IS the canonical error object rather than a value —
-    // the same one lp_invoke would have written to out_error_json — so it is
-    // decoded into the CallError and the value stays null.
-    static void resultTrampoline(int ok, const char* json, void* ud)
-    {
-        auto* fn = static_cast<ResultBox*>(ud);
-        nlohmann::json parsed;  // null
-        if (json) {
-            auto p = nlohmann::json::parse(json, nullptr, /*allow_exceptions=*/false);
-            if (!p.is_discarded()) parsed = std::move(p);
-        }
-        logos::CallError err;
-        if (!ok) {
-            err = logos::callErrorCallFailed("", "lp_invoke_async failed");
-            if (parsed.is_object()) {
-                if (parsed.contains("code") && parsed["code"].is_string())
-                    err.code = parsed["code"].get<std::string>();
-                if (parsed.contains("message") && parsed["message"].is_string())
-                    err.message = parsed["message"].get<std::string>();
-                if (parsed.contains("origin") && parsed["origin"].is_string())
-                    err.origin = parsed["origin"].get<std::string>();
-            }
-            parsed = nlohmann::json();
-        }
-        (*fn)(std::move(parsed), err);
-        delete fn;  // result callback fires exactly once
-    }
 
     // Mirror the bootstrap tokens the host delivered to the LogosAPI's
     // TokenManager into the one the plugin-side lp client reads. Cheap (two
@@ -341,9 +256,7 @@ private:
     std::string m_target;
     std::string m_origin;
     logos::LpClient m_client;
-    lp_client* m_resultClient = nullptr;
-    std::once_flag m_resultClientOnce;
-    std::mutex m_mutex;   // guards m_subs only — see resultClient()
+    std::mutex m_mutex;   // guards m_subs only
     std::vector<logos::LpSubscription> m_subs;
 };
 
