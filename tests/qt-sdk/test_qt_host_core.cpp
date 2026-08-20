@@ -24,7 +24,8 @@ struct CoreStub {
     std::vector<std::string> known{"alpha", "beta"};
     std::vector<std::string> loaded{"alpha"};
     std::string statsJson =
-        R"([{"name":"alpha","cpu":7.25,"memory":8192,"extra":"kept","flag":true}])";
+        R"([{"name":"alpha","cpu_percent":7.25,"cpu_time_seconds":1.5,)"
+        R"("memory_mb":8192.0,"extra":"kept","flag":true}])";
     bool tokenPresent = true;
 };
 
@@ -104,7 +105,7 @@ TEST_F(QtHostCoreTest, StatsCarryBothModelledAndUnmodelledFields)
     // Modelled, under the struct's spelling.
     EXPECT_EQ(m.value("name").toString(), QStringLiteral("alpha"));
     EXPECT_DOUBLE_EQ(m.value("cpuPercent").toDouble(), 7.25);
-    EXPECT_EQ(m.value("memoryBytes").toLongLong(), 8192);
+    EXPECT_DOUBLE_EQ(m.value("memoryMb").toDouble(), 8192.0);
 
     // Unmodelled keys survive, so a field added to liblogos' stats JSON is
     // readable without this header growing first.
