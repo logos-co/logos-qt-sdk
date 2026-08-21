@@ -66,8 +66,16 @@ endif()
 # an include directory. Consumers see no difference — the archive they used to
 # get from here now arrives through logos-qt-host's imported target — but two
 # Windows-only mechanisms DID notice, because both were written against
-# `logos-qt-sdk::logos_qt_sdk` being an archive. See logos-liblogos/src and
-# LogosSharedFromDll.cmake in logos-basecamp / logos-logoscore-cli.
+# `logos-qt-sdk::logos_qt_sdk` being an archive.
+#
+# Both are gone now. The shared-runtime migration replaced them: logos-protocol
+# and logos-plugin-qt ship real shared libraries that own their own symbols, and
+# in-process consumers link those instead of emptying archives. liblogos-side
+# whole-archive + generated .def went in logos-liblogos#182;
+# LogosSharedFromDll.cmake was deleted from logos-basecamp (#348) and
+# logos-logoscore-cli (#98). The invariant they protected is now asserted
+# directly, by nix/symbol-gate.nix in those repos and in logos-standalone-app.
+# See logos-protocol/cpp/logos_shared_api.h for the current scheme.
 # ── logos-cpp-sdk, for the HOST capability ───────────────────────────────────
 # logos_qt_host_core.h is Qt marshalling over logos::host::LogosCore, so the
 # host target needs logos-cpp-sdk's include dir. Probed in both layouts like
