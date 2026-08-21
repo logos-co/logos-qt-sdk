@@ -1,6 +1,7 @@
 #ifndef LOGOS_UI_PLUGIN_CONTEXT_H
 #define LOGOS_UI_PLUGIN_CONTEXT_H
 
+#include <functional>
 #include <type_traits>
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,27 @@
 // `#include "logos_sdk.h"`, at which point the inline `modules()` body compiles.
 struct LogosModules;
 
+// How a view answers aboutToUnload(). Deliberately mirrors logos-cpp-sdk's
+// `LogosShutdown` (same name, same order, same meaning) so a Logos author meets
+// ONE teardown vocabulary whether they are writing a module or a view.
+//
+// It is redeclared here rather than included because this repo's UI layer takes
+// no dependency on logos-cpp-sdk's module headers -- and it does not have to:
+// a UI plugin is a view, not a module, so `logos_module_context.h` and this
+// header are never in one translation unit. If that ever stops being true the
+// compiler says so at the redefinition, which is the loud failure, not a silent
+// one.
+//
+// Synchronous  — the view is already quiescent; the host may tear it down as
+//                soon as the call returns.
+// Asynchronous — the view has work to finish first. The host waits, up to a
+//                bounded grace period, until the view calls unloadFinished().
+//                A grace period is not a veto: the host proceeds either way.
+enum class LogosShutdown {
+    Synchronous,
+    Asynchronous,
+};
+
 class LogosUiPluginContext {
 public:
     virtual ~LogosUiPluginContext() = default;
@@ -86,6 +108,20 @@ public:
         onContextReady();
     }
 
+    // Framework-only — installs the trampoline `unloadFinished()` fires down.
+    // The generated plugin sets this to a queued emission of its own
+    // `unloadFinished()` signal, which is what ui-host is waiting on. It stays
+    // empty outside a framework context, which is what makes unloadFinished()
+    // a no-op there rather than a crash.
+    void _logosCoreSetUnloadFinished_(std::function<void()> cb) {
+        m_unloadFinishedCallback = std::move(cb);
+    }
+
+    // Framework-only — drives the hook. Named apart from aboutToUnload() so the
+    // protected override stays the only thing an author sees, and so the plugin
+    // has an entry point without making the hook itself public.
+    LogosShutdown _logosCoreAboutToUnload_() { return aboutToUnload(); }
+
 protected:
     // Hook for derived backends. Fires exactly once, after `modules()` becomes
     // usable, before the view's first call. The default is a no-op; override to
@@ -94,11 +130,44 @@ protected:
     // dependencies over.
     virtual void onContextReady() {}
 
+    // Hook for derived backends, fired when the host is about to tear this view
+    // down — after the view's event loop has returned, before the plugin is
+    // destroyed. The default answers Synchronous, so a view that does not
+    // override this costs its teardown nothing at all.
+    //
+    // Override and return Asynchronous to buy a bounded grace period for work
+    // that cannot finish inline (flushing a draft, closing a session). Having
+    // done so, you MUST call unloadFinished() when the work completes:
+    // forgetting costs every teardown of this view the full grace period.
+    // Returning Synchronous while work is still in flight is the other bug, and
+    // the quieter one.
+    //
+    // NOT part of the view's .rep contract: this is framework plumbing, so it
+    // is never remoted and no QML caller can reach it.
+    virtual LogosShutdown aboutToUnload() { return LogosShutdown::Synchronous; }
+
+    // Signal that the Asynchronous teardown begun in aboutToUnload() has
+    // finished. Safe from any thread — the generated plugin's trampoline
+    // marshals the emission back to the plugin's thread — and safe to call when
+    // the host is not listening (outside a framework context, or after the
+    // grace period elapsed): a no-op then rather than an error, so a view needs
+    // no special case for being torn down under a deadline it missed.
+    //
+    // Calling it more than once is harmless; the host acts on the first.
+    void unloadFinished() const {
+        if (m_unloadFinishedCallback)
+            m_unloadFinishedCallback();
+    }
+
 private:
     // Type-erased so this header doesn't need the per-module LogosModules
     // definition. Reinterpreted via the typed `modules()` accessor above.
     // Stays null when the backend is constructed outside the generated glue.
     void* m_logosModulesPtr = nullptr;
+    // Installed by the generated plugin; see _logosCoreSetUnloadFinished_.
+    // Stays empty for a backend constructed outside the generated glue, which
+    // is what makes unloadFinished() a no-op in unit tests.
+    std::function<void()> m_unloadFinishedCallback;
 };
 
 // ---------------------------------------------------------------------------
@@ -124,6 +193,31 @@ inline auto maybeSetUiPluginModules(T&, void*)
     -> std::enable_if_t<!std::is_base_of_v<LogosUiPluginContext, T>>
 {
     // Backend didn't opt into LogosUiPluginContext; nothing to do.
+}
+
+// Same tag dispatch for the teardown hook. Returns the LogosShutdown as an int
+// because the generated plugin hands it straight back to a host that resolves
+// this by signature string and must not need this enum to do it.
+//
+// `cb` is installed BEFORE the backend is asked, so a backend that finishes its
+// work inline still finds a live trampoline; installing it afterwards would
+// drop that completion and cost the view its full grace period.
+template<class T, class Cb>
+inline auto maybeUiPluginAboutToUnload(T& backend, Cb cb)
+    -> std::enable_if_t<std::is_base_of_v<LogosUiPluginContext, T>, int>
+{
+    auto& ctx = static_cast<LogosUiPluginContext&>(backend);
+    ctx._logosCoreSetUnloadFinished_(std::move(cb));
+    return static_cast<int>(ctx._logosCoreAboutToUnload_());
+}
+
+template<class T, class Cb>
+inline auto maybeUiPluginAboutToUnload(T&, Cb)
+    -> std::enable_if_t<!std::is_base_of_v<LogosUiPluginContext, T>, int>
+{
+    // Backend didn't opt into LogosUiPluginContext, so it has nothing to
+    // finish: Synchronous.
+    return 0;
 }
 
 } // namespace _logos_codegen_

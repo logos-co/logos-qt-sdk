@@ -90,6 +90,25 @@ QString lidlMakeUiGlueHeader(const UiGlueSpec& spec)
     s << "    QString name() const override { return QStringLiteral(\"" << spec.moduleName << "\"); }\n";
     s << "    QString version() const override { return QStringLiteral(\"" << spec.moduleVersion << "\"); }\n\n";
     s << "    Q_INVOKABLE void initLogos(LogosAPI* api);\n\n";
+    // Teardown, reached by the host through the META-OBJECT rather than the
+    // vtable. PluginInterface is compiled separately into every plugin, so
+    // adding a virtual there would shift the vtable under every plugin already
+    // built and turn a missing hook into undefined behaviour instead of a
+    // no-op. `initLogos` above is delivered by name for the same reason.
+    //
+    // Emitted unconditionally, for EVERY view. A backend that does not derive
+    // LogosUiPluginContext answers Synchronous through the SFINAE helper, so
+    // the surface costs a view that ignores it exactly one meta-call at
+    // teardown -- and emitting it always is what lets ui-host resolve one name
+    // rather than probing for two shapes.
+    //
+    // Returns the LogosShutdown as an int because the host resolves this by
+    // signature string and must not need the SDK enum to do it.
+    s << "    Q_INVOKABLE int aboutToUnload();\n\n";
+    s << "Q_SIGNALS:\n";
+    s << "    // Emitted when an Asynchronous teardown has finished. The host\n";
+    s << "    // connects to this by name and stops waiting on the first one.\n";
+    s << "    void unloadFinished();\n\n";
     s << "private:\n";
     s << "    std::unique_ptr<" << spec.backendClass << "> m_backend;\n";
     s << "    std::unique_ptr<LogosModules> m_logosModules;\n";
@@ -124,6 +143,23 @@ QString lidlMakeUiGlueSource(const UiGlueSpec& spec)
     s << "    // Register the backend (a " << spec.repClass << "SimpleSource) as the QtRO\n";
     s << "    // source so ui-host can enableRemoting the typed " << spec.repClass << "SourceAPI.\n";
     s << "    setBackend(m_backend.get());\n";
+    s << "}\n\n";
+    // Teardown. The plugin object is what the host reaches by name; the work
+    // itself belongs to the user-written backend.
+    s << "int " << spec.pluginBase << "Plugin::aboutToUnload()\n{\n";
+    s << "    // maybeUiPluginAboutToUnload installs the completion trampoline\n";
+    s << "    // BEFORE asking the backend, because a backend that finishes inline\n";
+    s << "    // would otherwise signal into an empty slot and the host would wait\n";
+    s << "    // out the whole grace period for a view already done.\n";
+    s << "    //\n";
+    s << "    // The trampoline runs on whichever thread the backend finished on, so\n";
+    s << "    // it must not touch the plugin directly -- a QUEUED invokeMethod\n";
+    s << "    // marshals the emission back to the plugin's thread, which is where\n";
+    s << "    // the host is waiting. It answers 0 (Synchronous) for a backend that\n";
+    s << "    // does not derive LogosUiPluginContext.\n";
+    s << "    return _logos_codegen_::maybeUiPluginAboutToUnload(*m_backend, [this]() {\n";
+    s << "        QMetaObject::invokeMethod(this, \"unloadFinished\", Qt::QueuedConnection);\n";
+    s << "    });\n";
     s << "}\n";
     return c;
 }

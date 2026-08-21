@@ -211,3 +211,30 @@ target_link_libraries(qtgen_origin_umbrella_tu PRIVATE
     logos_qt_sdk
     Qt${QT_VERSION_MAJOR}::Core
 )
+
+# --- 4. --backend ui: the view plugin's host-facing surface -------------------
+#
+# This backend had NO test at all, which is how it came to be the one generated
+# plugin class that did not publish the teardown hook. ui-host reaches
+# aboutToUnload() BY NAME through the meta-object; a plugin class that does not
+# declare it has no such meta-method, invokeMethod returns false, and the host
+# moves on silently. So dropping this emission again would not fail a build, or
+# a load, or a call -- every view would simply, and permanently, lose its chance
+# to finish. Nothing else in this repo would notice.
+set(_ui_fixtures ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/ui)
+
+add_test(NAME qtgen.ui_plugin_surface COMMAND ${CMAKE_COMMAND}
+    -DGENERATOR=${LOGOS_QT_GENERATOR}
+    -DMETADATA=${_ui_fixtures}/metadata.json
+    -DREP=${_ui_fixtures}/Ticker.rep
+    -DOUT_DIR=${_work}/ui_plugin_surface
+    # The three properties the host depends on, each named so it fails with its
+    # own sentence:
+    #   * the hook is INVOKABLE and returns int -- the host reads it back with
+    #     Q_RETURN_ARG(int) and must not need the SDK enum to resolve it;
+    #   * the completion signal exists -- a view that answers Asynchronous with
+    #     no way to say it is done gets refused the wait outright;
+    #   * the emission is QUEUED -- the backend may finish on any thread, and the
+    #     host is waiting on the plugin's.
+    "-DREQUIRE_TEXT=Q_INVOKABLE int aboutToUnload();|void unloadFinished();|Q_SIGNALS:|maybeUiPluginAboutToUnload|Qt::QueuedConnection"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/run_ui_generator.cmake)
