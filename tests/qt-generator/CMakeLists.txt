@@ -7,11 +7,11 @@
 #     means a change leaked into a path that was supposed to be untouched.
 #     The goldens are a review artifact, not a snapshot to refresh on red.
 #
-#  2. The optional paths generate, and an optional RETURN is refused with its
-#     reason on every backend that could otherwise emit one. Since `--backend
-#     qt` was retired, `consumer` is the only such backend: it is the only one
-#     that can emit a CALLER for a method whose empty answer would be
-#     indistinguishable from a failed call.
+#  2. The optional paths generate — INCLUDING an optional RETURN, which this
+#     backend refused until the type mapping became lossless. `?T` is
+#     std::optional<T> now, and failure travels on the CallError channel rather
+#     than in the value, so "found nothing" and "the call failed" are no longer
+#     one answer. See `optional_return_consumer` below for what is asserted.
 #
 # These drive the installed generator binary rather than linking its internals,
 # because the binary is what module-builder actually invokes.
@@ -63,11 +63,27 @@ _qtgen_test(plain_consumer golden consumer plain_module.lidl GOLDEN_DIR plain_co
 # --- 2. the optional paths generate at all -----------------------------------
 _qtgen_test(optional_consumer generate consumer optional_module.lidl)
 
-# --- 3. an optional RETURN is refused, with its reason ------------------------
-# Asserting the REASON, not just the failure: a bare non-zero exit would also be
-# satisfied by an unrelated parse error, which would quietly retire the tripwire.
-_qtgen_test(refuse_return_consumer refuse consumer refuses_optional_return.lidl
-            EXPECT_TEXT "optional RETURN")
+# --- 3. an optional RETURN generates, and keeps its value type ----------------
+#
+# This case was a REFUSAL until the Qt type mapping became lossless. The reason
+# for the refusal was that an empty `?T` is JSON null on the wire and null was
+# also how a failed call reported itself, so the two were indistinguishable.
+#
+# What is asserted now is not "it generates" — that alone would also be
+# satisfied by a wrapper that returns a bare QVariant and re-creates the
+# ambiguity. It is the two properties that make generating safe:
+#
+#   1. the RETURN keeps its value type, so the empty answer (std::nullopt) is
+#      distinct from a present empty string;
+#   2. the body still reads failure from the ERROR channel — `logos::CallError`,
+#      filled from the C ABI's return code — and decides nothing from whether
+#      the result is null. `logos::qt::invoke` is what enforces that; a body
+#      that started branching on `_r.is_null()` would be the regression.
+_qtgen_test(optional_return_consumer generate consumer refuses_optional_return.lidl
+            REQUIRE_TEXT "std::optional<QString> lookup(const QString& id"
+                         "if (__s.is_null()) return std::optional<QString>()"
+                         "logos::qt::invoke(m_bridge, \"lookup\", _args, &_err"
+            FORBID_TEXT "_r.is_null()")
 
 # --- 3b. the LogosAPI-FREE consumer binding (--binding origin) ----------------
 #

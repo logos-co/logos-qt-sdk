@@ -395,27 +395,32 @@ bool moduleUsesStdOptional(const ModuleDecl& m)
 
 }  // namespace
 
-// ── contract gate ───────────────────────────────────────────────────────────
-
-bool lidlCheckOptionalReturns(const ModuleDecl& module, QString* error)
-{
-    for (const MethodDecl& md : module.methods) {
-        if (md.returnType.kind != TypeExpr::Optional) continue;
-        if (error) {
-            *error = QStringLiteral(
-                "%1: an optional RETURN (`-> ?T`) is not supported. An empty `?T` is "
-                "spelled JSON null on the wire, and null is already how this path "
-                "reports a FAILED call (logos_json_convert maps it to an invalid "
-                "QVariant, which core_service reports as METHOD_FAILED) — so \"found "
-                "nothing\" would be indistinguishable from \"the call failed\" for every "
-                "non-Rust caller. Take `?T` as a PARAMETER, or return a `result`.")
-                .arg(qs(md.name));
-        }
-        return false;
-    }
-    return true;
-}
-
+// ── the retired `-> ?T` gate ────────────────────────────────────────────────
+//
+// This backend used to REFUSE a contract with an optional RETURN, because an
+// empty `?T` is JSON null on the wire and null was also how a FAILED call
+// reported itself to a non-Rust caller — so "found nothing" and "the call
+// failed" were the same answer.
+//
+// Neither half of that is true on the path this generator emits for.
+//
+//   * FAILURE IS NOT SIGNALLED BY THE VALUE. A generated body calls
+//     logos::qt::invoke -> logos::LpClient::invoke, which decides success from
+//     the C ABI's return code (`rc == LP_OK`) and never from the result's
+//     null-ness — see logos-cpp-sdk's logos_lp_client.h. A successful call
+//     returning null arrives with `err.ok()` true; a failed one arrives with
+//     `err` populated. The two ARE distinguishable, on both the sync and the
+//     result-carrying async surfaces.
+//   * THE VALUE IS NOT DEFAULT-CONSTRUCTED EITHER. `?T` is std::optional<T>
+//     now, so the empty answer is std::nullopt — distinct from T{}, which is
+//     what a bare QVariant return could not express.
+//
+// One null-means-failure rule does survive, and it is worth naming rather than
+// leaving for someone to rediscover: logoscore's core_service turns a null
+// result into METHOD_FAILED for `logosctl module call`. It is a CLI-layer rule
+// about untyped invocation, it is not on this path, and `-> any` — which may
+// legitimately answer null and has never been gated — already trips it. Gating
+// `-> ?T` while allowing `-> any` was the inconsistency, not the protection.
 // ── header ──────────────────────────────────────────────────────────────────
 
 QString lidlMakeQtConsumerHeader(const ModuleDecl& module,

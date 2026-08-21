@@ -53,6 +53,9 @@ module widened_module {
   method roundtrip(b: Bag) -> Bag
   method echo_uints(v: [uint]) -> [uint]
   method find(id: ?tstr, exact: bool) -> tstr
+  ; An optional RETURN — refused by this backend until the mapping became
+  ; lossless. Here so the round-trip TU COMPILES and LINKS one.
+  method lookup(id: tstr) -> ?tstr
 
   event bagged(b: Bag, seq: uint)
 }

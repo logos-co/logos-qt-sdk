@@ -22,16 +22,6 @@
 #include "lidl_compat.h"
 #include <QString>
 
-// Reject what this path cannot express. Today that is exactly one thing: an
-// optional RETURN, whose empty inhabitant is indistinguishable here from a
-// failed call. Fills *error with the reason. Mirrors lidlCheckRecords' shape
-// (lidl_compat.h) so main.cpp treats both the same way.
-//
-// It lives beside the consumer emitter because that is the only emitter left
-// that can produce a caller for such a method; it was previously carried by the
-// retired `--backend qt` provider emitter, which shared the constraint.
-bool lidlCheckOptionalReturns(const ModuleDecl& module, QString* error);
-
 // Whether the emitted wrapper targets ONE fixed module or binds at runtime.
 //   Static — `<Class>(LogosAPI*)`, the module name baked into every call.
 //            What a concrete `dependencies` entry generates.
