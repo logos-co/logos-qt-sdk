@@ -1,0 +1,125 @@
+; THE NESTING FIXTURE. widened_module.lidl has one slot per ROW of the Qt type
+; table; this one has one slot per COMBINATION of two rows, because that is the
+; axis the table does not cover and the axis two shapes were broken on.
+;
+; The enumeration is mechanical, not a sample. Three containers can hold a
+; value — `[X]`, `{tstr: X}` and `?X` — so a depth-2 type is one of nine
+; C1(C2(L)) pairs, and `??L` is the ninth only nominally (optionality is
+; idempotent, so it denotes the same two states as `?L`). Every pair appears
+; below for a CHECKED leaf (`uint`) and for a RECORD (`Point`), which are the
+; two leaf kinds whose decode differs; the `tstr`, `bstr` and `any` blocks add
+; the leaves whose Qt spelling is itself special — QStringList crosses whole,
+; bytes stay tagged at every depth, and `any` must not widen at any depth.
+;
+; Two of these did not COMPILE before the emitter had one loop shape per
+; container: `{tstr: {tstr: Point}}` emitted `for (auto __i = __i.value()...)`,
+; `__i` in its own initialiser, and `?{tstr: Point}` emitted `*__c.cbegin()`,
+; which parses as `*(__c.cbegin())` and asks a std::optional for an iterator.
+; Both are here, and so is every neighbour that would have been next.
+;
+; Compilation is the assertion. nested_tu.cpp includes the generated .cpp, so a
+; shape that does not compile fails the BUILD; the round trips beside it then
+; check that the ones that do compile also carry their values.
+module nested_module {
+  version "1.0.0"
+  description "Every two-container nesting, and a sample of three."
+
+  type Point {
+    x: float64
+    y: float64
+  }
+
+  ; ── depth 2, checked leaf ────────────────────────────────────────────────
+  type UintNest {
+    ll: [[uint]]
+    lm: [{tstr: uint}]
+    lo: [?uint]
+    ml: {tstr: [uint]}
+    mm: {tstr: {tstr: uint}}
+    mo: {tstr: ?uint}
+    ol: ?[uint]
+    om: ?{tstr: uint}
+    oo: ??uint
+  }
+
+  ; ── depth 2, record leaf ─────────────────────────────────────────────────
+  ;
+  ; `mm` and `om` are the two shapes that did not compile.
+  type RecNest {
+    ll: [[Point]]
+    lm: [{tstr: Point}]
+    lo: [?Point]
+    ml: {tstr: [Point]}
+    mm: {tstr: {tstr: Point}}
+    mo: {tstr: ?Point}
+    ol: ?[Point]
+    om: ?{tstr: Point}
+    oo: ??Point
+  }
+
+  ; ── the leaves with a special Qt spelling ────────────────────────────────
+  ;
+  ; `[tstr]` is QStringList, the one typed array that crosses WHOLE, so
+  ; `[[tstr]]` is a QList of things that are each handed over intact while the
+  ; outer list still loops. `bstr` must stay tagged however deep it sits. `any`
+  ; must stay QVariant / QVariantList / QVariantMap at every depth — these are
+  ; the rows that must NOT widen, checked at depth 2 rather than only at 1.
+  type LeafNest {
+    ss_ll: [[tstr]]
+    ss_ml: {tstr: [tstr]}
+    ss_ol: ?[tstr]
+    ss_lo: [?tstr]
+    ss_mm: {tstr: {tstr: tstr}}
+    bb_ll: [[bstr]]
+    bb_ml: {tstr: [bstr]}
+    bb_ol: ?[bstr]
+    bb_lo: [?bstr]
+    aa_ll: [[any]]
+    aa_ml: {tstr: [any]}
+    aa_ol: ?[any]
+    aa_lo: [?any]
+    aa_mm: {tstr: {tstr: any}}
+  }
+
+  ; ── depth 3 ──────────────────────────────────────────────────────────────
+  ;
+  ; Not exhaustive — 27 pairs of pairs is a fixture nobody reads. These are the
+  ; ones where a third level changes WHICH names collide: three list loops in a
+  ; row, three map loops in a row, and each container wrapped around a pair that
+  ; already mixes kinds.
+  type DeepNest {
+    lll: [[[uint]]]
+    mmm: {tstr: {tstr: {tstr: uint}}}
+    olm: ?[{tstr: Point}]
+    lom: [?{tstr: uint}]
+    mol: {tstr: ?[Point]}
+    lmo: [{tstr: ?tstr}]
+    oml: ?{tstr: [Point]}
+    mlo: {tstr: [?Point]}
+  }
+
+  ; A record whose fields are the other records, so a nested record decode is
+  ; reached through a container as well as directly.
+  type Everything {
+    uints: UintNest
+    recs: RecNest
+    leaves: LeafNest
+    deep: DeepNest
+    bag_of_recs: {tstr: [RecNest]}
+  }
+
+  ; RETURN positions. A return type is written OUTSIDE the wrapper class, so a
+  ; record mentioned inside one has to be qualified — and the qualification runs
+  ; during the type walk, at the one place that knows a name is a record. These
+  ; two are the shapes that walk deepest before reaching `Point`.
+  method deep_map_return() -> {tstr: {tstr: Point}}
+  method deep_opt_return() -> ?{tstr: Point}
+  method deep_list_return() -> [[Point]]
+
+  ; PARAMETER positions, and a round-trip method over the umbrella record.
+  method deep_args(a: [[Point]], b: ?[{tstr: uint}], c: {tstr: {tstr: tstr}}) -> bool
+  method roundtrip(e: Everything) -> Everything
+
+  ; EVENT positions — a third emitter site for the same expressions.
+  event deep_event(a: {tstr: {tstr: Point}}, b: ?[Point], c: [[uint]])
+}

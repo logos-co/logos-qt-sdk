@@ -124,3 +124,15 @@ worth reading.** `echo_strings` (`[tstr]` → QStringList), `attributes`
 scalar did not move — QStringList is already in that closed set, and every
 `any`-bottomed shape deliberately keeps the QVariant spelling because QVariant
 is the only Qt type that holds bytes AND an exact uint64 AND arbitrary nesting.
+
+Rebased once more, for ONE emitter fix. Both goldens moved by the SAME hunk, and
+the emitted HEADERS did not move at all — the fix changes no public signature.
+
+| change | why |
+|---|---|
+| `bounds`: the `[Point]` argument encode takes its source as a lambda ARGUMENT (`}(points)`) instead of inlining it (`for (const auto& __e : points)`) | `QList<Record>` and `QMap<QString, Record>` had their own hand-written loops beside the generic ones, and those two INLINED their source. At depth that emitted code which does not compile — `{tstr: {tstr: Point}}` produced `for (auto __i = __i.value().cbegin(); …)`, `__i` in its own initialiser, and `?{tstr: Point}` produced `*x.cbegin()`, which parses as `*(x.cbegin())`. The special cases are gone; the generic loops already produce identical code for both, because they recurse onto the scalar record case |
+
+**Nothing else moved.** `translate` and `bounds` still call `recToWire_Point` /
+`recFromWire_Point` exactly where they did, and the three shapes a record can
+appear in produce the same JSON they always did — the fix is about the SPELLING
+of the loop, not about what it encodes.

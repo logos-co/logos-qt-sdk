@@ -293,9 +293,38 @@ add_custom_command(
 )
 add_custom_target(qtgen_roundtrip_sources DEPENDS ${_rt_generated})
 
-add_executable(qtgen_roundtrip_tests ${CMAKE_CURRENT_SOURCE_DIR}/roundtrip_tu.cpp)
-add_dependencies(qtgen_roundtrip_tests qtgen_roundtrip_sources)
-target_include_directories(qtgen_roundtrip_tests PRIVATE ${_rt_dir})
+# --- 6b. the NESTING axis: every two-container combination COMPILES ----------
+#
+# The fixture above has one slot per ROW of the widened type table. This one has
+# one slot per two-container COMBINATION, and it exists because that axis had
+# shapes no fixture had ever generated — and their failure mode is not a wrong
+# value but text a compiler REFUSES:
+#
+#   {tstr: {tstr: Point}}  ->  `for (auto __i = __i.value().cbegin(); ...)`
+#                              `__i` used inside its own initialiser
+#   ?{tstr: Point}         ->  `*__c.cbegin()`, i.e. `*(__c.cbegin())`,
+#                              a std::optional asked for an iterator
+#
+# So the assertion here is the BUILD. A separate translation unit rather than
+# more slots in widened_module.lidl: each TU `#include`s exactly one generated
+# .cpp, and two contracts that both declare a `Point` would collide in one.
+set(_nested_dir ${CMAKE_CURRENT_BINARY_DIR}/nested_tu)
+set(_nested_generated ${_nested_dir}/nested_module_api.cpp ${_nested_dir}/nested_module_api.h)
+
+add_custom_command(
+    OUTPUT ${_nested_generated}
+    COMMAND ${LOGOS_QT_GENERATOR} --lidl ${_fixtures}/nested_module.lidl
+            --backend consumer --module nested_module --output-dir ${_nested_dir}
+    DEPENDS ${_fixtures}/nested_module.lidl
+    COMMENT "Generating the nested-shapes consumer wrapper for the compile + round-trip test"
+)
+add_custom_target(qtgen_nested_sources DEPENDS ${_nested_generated})
+
+add_executable(qtgen_roundtrip_tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/roundtrip_tu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/nested_tu.cpp)
+add_dependencies(qtgen_roundtrip_tests qtgen_roundtrip_sources qtgen_nested_sources)
+target_include_directories(qtgen_roundtrip_tests PRIVATE ${_rt_dir} ${_nested_dir})
 target_link_libraries(qtgen_roundtrip_tests PRIVATE
     logos_qt_sdk
     GTest::gtest
@@ -303,6 +332,38 @@ target_link_libraries(qtgen_roundtrip_tests PRIVATE
     Qt${QT_VERSION_MAJOR}::Core
 )
 gtest_discover_tests(qtgen_roundtrip_tests)
+
+# --- 7. the nested shapes, as TEXT ------------------------------------------
+#
+# The compile target above is the real assertion. This names the individual
+# properties, so a regression fails with its own sentence rather than as a
+# compile error 400 columns wide.
+#
+# The FORBID list is the more important half, and each entry was MEASURED: the
+# generator at the commit before this one emits every one of them for this exact
+# fixture (counts in parentheses), and emits none of them after.
+#
+#   for (auto __i = __i         (1)  `{tstr: {tstr: Rec}}` — the map iterator
+#                                    initialised from ITSELF
+#   for (auto __i = *           (1)  `?{tstr: Rec}` — `*x.cbegin()`, which parses
+#                                    as `*(x.cbegin())` and asks a std::optional
+#                                    for an iterator
+#   for (const auto& __e : __e) (4)  the list twin: a range-for over the name the
+#                                    loop itself declares
+#   const nlohmann::json& __src (20) a decode source bound to a LOCAL instead of
+#                                    passed as a lambda argument — the ROOT of
+#                                    all three, and the one that catches the
+#                                    mistake before it picks a spelling
+#
+# The REQUIRE entries beside them are the positive: after the fix there is
+# exactly ONE spelling of each loop, and its source is always the parameter.
+_qtgen_test(nested_shapes_emit generate consumer nested_module.lidl
+            REQUIRE_TEXT "for (auto __i = __c.cbegin()"
+                         "for (const auto& __e : __c)"
+            FORBID_TEXT "for (auto __i = __i"
+                        "for (auto __i = *"
+                        "for (const auto& __e : __e)"
+                        "const nlohmann::json& __src")
 
 # --- 4. --backend ui: the view plugin's host-facing surface -------------------
 #

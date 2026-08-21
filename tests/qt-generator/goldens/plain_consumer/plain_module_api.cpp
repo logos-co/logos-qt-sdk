@@ -423,7 +423,7 @@ void PlainModule::translateAsyncResult(const Point& p, double dx, std::function<
 
 PlainModule::Point PlainModule::bounds(const QList<Point>& points, logos::CallError* err, Timeout timeout) {
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back([&]{ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : points) __acc.push_back(recToWire_Point(__e)); return __acc; }());
+    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(recToWire_Point(__e)); return __acc; }(points));
     logos::CallError _err;
     nlohmann::json _r = logos::qt::invoke(m_bridge, "bounds", _args, &_err, timeout.ms);
     if (_err.ok()) logosDispatchRejectionJson(_r, _err);
@@ -435,7 +435,7 @@ PlainModule::Point PlainModule::bounds(const QList<Point>& points, logos::CallEr
 void PlainModule::boundsAsync(const QList<Point>& points, std::function<void(Point)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back([&]{ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : points) __acc.push_back(recToWire_Point(__e)); return __acc; }());
+    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(recToWire_Point(__e)); return __acc; }(points));
     logos::qt::invokeAsync(m_bridge, "bounds", _args,
         [callback](nlohmann::json _r) {
             { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))
@@ -447,7 +447,7 @@ void PlainModule::boundsAsync(const QList<Point>& points, std::function<void(Poi
 void PlainModule::boundsAsyncResult(const QList<Point>& points, std::function<void(logos::AsyncResult<Point>)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back([&]{ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : points) __acc.push_back(recToWire_Point(__e)); return __acc; }());
+    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(recToWire_Point(__e)); return __acc; }(points));
     logos::qt::invokeAsyncResult(m_bridge, "bounds", _args,
         [callback](nlohmann::json _r, const logos::CallError& _err) {
             logos::AsyncResult<Point> _res;

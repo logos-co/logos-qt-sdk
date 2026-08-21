@@ -70,25 +70,28 @@ bool isRecordName(const ModuleDecl& m, const std::string& n)
     return false;
 }
 
-enum class RecShape { None, Scalar, List, Map };
-
-// How a type mentions a record, if at all. Mirrors the shapes the Qt surface
-// already exposed: `Foo`, `QList<Foo>`, `QMap<QString, Foo>`.
-RecShape recordShape(const ModuleDecl& m, const TypeExpr& te, QString* elem)
+// Does this type name a record DIRECTLY — `Foo`, and not `[Foo]` or
+// `{tstr: Foo}`?
+//
+// It used to answer the composite shapes too (a `RecShape` of None / Scalar /
+// List / Map), because `QList<Foo>` and `QMap<QString, Foo>` each had their own
+// hand-written encode and decode loop beside the generic ones. That duplication
+// was the defect: those two loops INLINED their source expression instead of
+// passing it as a lambda argument, so `{tstr: {tstr: Foo}}` emitted
+// `for (auto __i = __i.value().cbegin(); ...)` — `__i` in its own initialiser —
+// and `?{tstr: Foo}` emitted `*x.cbegin()`, which parses as `*(x.cbegin())` and
+// asks a std::optional for an iterator. Neither compiles; no fixture had either
+// shape.
+//
+// The generic container loops below already produce byte-identical code for
+// `[Foo]` and `{tstr: Foo}` — they recurse, and the recursion lands on the
+// scalar record case, which is this one. So the special cases are gone and there
+// is now exactly ONE list loop, ONE map loop and ONE optional wrapper per
+// direction, each taking its source as a PARAMETER. A shape can no longer
+// compile by luck, because there is only one shape.
+bool isRecordType(const ModuleDecl& m, const TypeExpr& te)
 {
-    auto take = [&](const std::string& n) { if (elem) *elem = qs(n); };
-    if (te.kind == TypeExpr::Named && isRecordName(m, te.name)) { take(te.name); return RecShape::Scalar; }
-    if (te.kind == TypeExpr::Array && te.elements.size() == 1
-        && te.elements[0].kind == TypeExpr::Named && isRecordName(m, te.elements[0].name)) {
-        take(te.elements[0].name);
-        return RecShape::List;
-    }
-    if (te.kind == TypeExpr::Map && te.elements.size() == 2
-        && te.elements[1].kind == TypeExpr::Named && isRecordName(m, te.elements[1].name)) {
-        take(te.elements[1].name);
-        return RecShape::Map;
-    }
-    return RecShape::None;
+    return te.kind == TypeExpr::Named && isRecordName(m, te.name);
 }
 
 QString recToWireFn(const QString& r)   { return "recToWire_" + r; }
@@ -131,7 +134,7 @@ QString surfaceType(const ModuleDecl& m, const TypeExpr& te, const QString& qual
 // containers here go by const-ref.
 bool byRef(const ModuleDecl& m, const TypeExpr& te, const QString& cppType)
 {
-    if (recordShape(m, te, nullptr) != RecShape::None) return true;
+    if (isRecordType(m, te)) return true;
     if (cppType.startsWith("QList<") || cppType.startsWith("QMap<")
         || cppType.startsWith("std::optional<")) return true;
     return cppType == "QString" || cppType == "QStringList"
@@ -195,7 +198,7 @@ QString fieldSurfaceType(const ModuleDecl& m, const FieldDecl& f, const QString&
 // are in that closed set and cross whole, exactly as they always did.
 bool needsElementLoop(const ModuleDecl& m, const TypeExpr& te)
 {
-    return recordShape(m, te, nullptr) != RecShape::None || lidlQtNeedsElementLoop(te);
+    return isRecordType(m, te) || lidlQtNeedsElementLoop(te);
 }
 
 // An element whose decode goes through the strict leaf decoder — i.e. neither a
@@ -208,22 +211,13 @@ bool isCheckedLeaf(const ModuleDecl& m, const TypeExpr& te)
 
 QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr)
 {
-    QString elem;
-    switch (recordShape(m, te, &elem)) {
-    case RecShape::Scalar:
-        return recToWireFn(elem) + "(" + expr + ")";
-    case RecShape::List:
-        return "[&]{ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : "
-             + expr + ") __acc.push_back(" + recToWireFn(elem) + "(__e)); return __acc; }()";
-    case RecShape::Map:
-        return "[&]{ nlohmann::json __acc = nlohmann::json::object(); for (auto __i = " + expr
-             + ".cbegin(); __i != " + expr + ".cend(); ++__i) __acc[__i.key().toStdString()] = "
-             + recToWireFn(elem) + "(__i.value()); return __acc; }()";
-    case RecShape::None:
-        break;
-    }
-    // The typed containers and optionals, the same loop shapes as the record
-    // cases above — those ARE the pattern, and there is deliberately only one.
+    // The one structural leaf: a record is a struct with a generated codec.
+    // `[Foo]`, `{tstr: Foo}` and `?Foo` are NOT special-cased — the container
+    // loops below recurse and land here.
+    if (isRecordType(m, te)) return recToWireFn(qs(te.name)) + "(" + expr + ")";
+
+    // The typed containers and optionals. There is deliberately ONE loop per
+    // container kind, and every record shape reaches it by recursion.
     //
     // THE SOURCE IS A LAMBDA PARAMETER, never a local bound inside the body.
     // These loops NEST — `[[uint]]` puts one inside another — and every level
@@ -279,23 +273,9 @@ QString decodeElementStmt(const ModuleDecl& m, const TypeExpr& te, const QString
 
 QString fromWire(const ModuleDecl& m, const TypeExpr& te, const QString& json, const QString& qual)
 {
-    QString elem;
+    if (isRecordType(m, te)) return recFromWireFn(qs(te.name)) + "(" + json + ")";
+
     const QString cpp = surfaceType(m, te, qual, /*paramPosition=*/false);
-    switch (recordShape(m, te, &elem)) {
-    case RecShape::Scalar:
-        return recFromWireFn(elem) + "(" + json + ")";
-    case RecShape::List:
-        return "[&]{ " + cpp + " __acc; const nlohmann::json& __src = " + json
-             + "; if (__src.is_array()) for (const auto& __e : __src) __acc.push_back("
-             + recFromWireFn(elem) + "(__e)); return __acc; }()";
-    case RecShape::Map:
-        return "[&]{ " + cpp + " __acc; const nlohmann::json& __src = " + json
-             + "; if (__src.is_object()) for (auto __i = __src.begin(); __i != __src.end(); ++__i) "
-               "__acc.insert(QString::fromStdString(__i.key()), " + recFromWireFn(elem)
-             + "(__i.value())); return __acc; }()";
-    case RecShape::None:
-        break;
-    }
     // Same loops in reverse, and the same rule about the source: it is a lambda
     // PARAMETER, so a nested level can reuse these names without the initialiser
     // ever naming something the body itself declares.
