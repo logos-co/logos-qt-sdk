@@ -1,0 +1,58 @@
+; THE WIDENING FIXTURE. One slot per row of the widened Qt type table, plus the
+; rows that must NOT widen.
+;
+; Its record `Bag` is the load-bearing part: a record field is encoded and
+; decoded by exactly the same generator expressions as a method argument and a
+; return value, and — unlike a method — its codec is a plain function
+; (`recToWire_Bag` / `recFromWire_Bag`) that a test can call with real values.
+; That is what makes roundtrip_tu.cpp a RUNTIME test of the emitted code rather
+; than an assertion about generated text.
+module widened_module {
+  version "1.0.0"
+  description "Every widened shape, and every shape that must stay untyped."
+
+  type Point {
+    x: float64
+    y: float64
+  }
+
+  type Bag {
+    ; typed arrays
+    uints: [uint]
+    ints: [int]
+    blobs: [bstr]
+    flags: [bool]
+    reals: [float64]
+    ; the two arrays that must NOT widen
+    names: [tstr]
+    loose: [any]
+    ; typed maps
+    counts: {tstr: uint}
+    labels: {tstr: tstr}
+    chunks: {tstr: bstr}
+    ; the map that must NOT widen
+    attrs: {tstr: any}
+    ; optionals, in both spellings, so they must emit identical code
+    ? maybe_text: tstr
+    maybe_uint: ?uint
+    ? maybe_blob: bstr
+    ; the optional that must NOT widen
+    ? maybe_any: any
+    ; nesting
+    grid: [[uint]]
+    buckets: {tstr: [uint]}
+    rows: [{tstr: uint}]
+    holes: [?tstr]
+    ; records, in every shape that can hold one
+    origin: Point
+    corners: [Point]
+    named_points: {tstr: Point}
+    ? maybe_point: Point
+  }
+
+  method roundtrip(b: Bag) -> Bag
+  method echo_uints(v: [uint]) -> [uint]
+  method find(id: ?tstr, exact: bool) -> tstr
+
+  event bagged(b: Bag, seq: uint)
+}

@@ -343,39 +343,39 @@ void PlainModule::echo_stringsAsyncResult(const QStringList& v, std::function<vo
         }, timeout.ms);
 }
 
-QVariantList PlainModule::echo_ints(const QVariantList& v, logos::CallError* err, Timeout timeout) {
+QList<qlonglong> PlainModule::echo_ints(const QList<qlonglong>& v, logos::CallError* err, Timeout timeout) {
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back(logos::qt::toWire(QVariant::fromValue(v)));
+    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(logos::qt::toWire(QVariant::fromValue(__e))); return __acc; }(v));
     logos::CallError _err;
     nlohmann::json _r = logos::qt::invoke(m_bridge, "echo_ints", _args, &_err, timeout.ms);
     if (_err.ok()) logosDispatchRejectionJson(_r, _err);
     if (err) *err = _err;
     else if (!_err.ok()) qWarning() << "PlainModule::echo_ints: remote call failed:" << QString::fromStdString(_err.message);
-    return logos::qt::fromWire<QVariantList>(_r);
+    return [&](const nlohmann::json& __s){ QList<qlonglong> __acc; if (!__s.is_array()) return __acc; for (const auto& __e : __s) { qlonglong __v{}; std::string __why; if (!logos::qt::tryFromWire(__e, __v, &__why)) { qWarning() << "PlainModule: rejected a `int` element:" << QString::fromStdString(__why); return QList<qlonglong>(); } __acc.push_back(__v); } return __acc; }(_r);
 }
 
-void PlainModule::echo_intsAsync(const QVariantList& v, std::function<void(QVariantList)> callback, Timeout timeout) {
+void PlainModule::echo_intsAsync(const QList<qlonglong>& v, std::function<void(QList<qlonglong>)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back(logos::qt::toWire(QVariant::fromValue(v)));
+    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(logos::qt::toWire(QVariant::fromValue(__e))); return __acc; }(v));
     logos::qt::invokeAsync(m_bridge, "echo_ints", _args,
         [callback](nlohmann::json _r) {
             { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))
                   qWarning() << "PlainModule::echo_intsAsync: remote call failed:" << QString::fromStdString(_rej.message); }
-            callback(logos::qt::fromWire<QVariantList>(_r));
+            callback([&](const nlohmann::json& __s){ QList<qlonglong> __acc; if (!__s.is_array()) return __acc; for (const auto& __e : __s) { qlonglong __v{}; std::string __why; if (!logos::qt::tryFromWire(__e, __v, &__why)) { qWarning() << "PlainModule: rejected a `int` element:" << QString::fromStdString(__why); return QList<qlonglong>(); } __acc.push_back(__v); } return __acc; }(_r));
         }, timeout.ms);
 }
 
-void PlainModule::echo_intsAsyncResult(const QVariantList& v, std::function<void(logos::AsyncResult<QVariantList>)> callback, Timeout timeout) {
+void PlainModule::echo_intsAsyncResult(const QList<qlonglong>& v, std::function<void(logos::AsyncResult<QList<qlonglong>>)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back(logos::qt::toWire(QVariant::fromValue(v)));
+    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(logos::qt::toWire(QVariant::fromValue(__e))); return __acc; }(v));
     logos::qt::invokeAsyncResult(m_bridge, "echo_ints", _args,
         [callback](nlohmann::json _r, const logos::CallError& _err) {
-            logos::AsyncResult<QVariantList> _res;
+            logos::AsyncResult<QList<qlonglong>> _res;
             _res.error = _err;
             if (_res.error.ok()) logosDispatchRejectionJson(_r, _res.error);
-            _res.value = logos::qt::fromWire<QVariantList>(_r);
+            _res.value = [&](const nlohmann::json& __s){ QList<qlonglong> __acc; if (!__s.is_array()) return __acc; for (const auto& __e : __s) { qlonglong __v{}; std::string __why; if (!logos::qt::tryFromWire(__e, __v, &__why)) { qWarning() << "PlainModule: rejected a `int` element:" << QString::fromStdString(__why); return QList<qlonglong>(); } __acc.push_back(__v); } return __acc; }(_r);
             callback(_res);
         }, timeout.ms);
 }

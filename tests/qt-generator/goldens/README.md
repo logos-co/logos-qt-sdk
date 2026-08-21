@@ -105,3 +105,22 @@ still come back as DATA. `CMakeLists.txt`'s
 `consumer_rejection_detector_matches_closed_code_set` and
 `consumer_rejection_detector_stays_narrow` state both halves as named
 properties, so a future golden refresh cannot quietly widen the match.
+
+Rebased again for the **lossless Qt type mapping** — the change that gave `[T]`,
+`{tstr: V}` and `?T` their element types on the Qt surface instead of
+QVariantList / QVariantMap / QVariant. Both goldens moved by the SAME hunks, and
+in this whole contract exactly ONE slot is affected:
+
+| change | why |
+|---|---|
+| `echo_ints`: `QVariantList` → `QList<qlonglong>` on all three overloads | `[int]` is a typed array, and the Qt surface now says so. It is the only widened shape in `plain_module.lidl` |
+| its argument encode becomes an element loop | `QVariant::fromValue(QList<qlonglong>)` is a value `qvariantToNlohmann` answers **null** for — it matches a closed `userType()` set. The loop hands it one ELEMENT at a time, each of which is in that set |
+| its return decode becomes an element loop through `logos::qt::tryFromWire` | the decode direction fails just as silently (`qvariant_cast<QList<qlonglong>>` of a QVariantList is EMPTY), and the per-element form is also what closes the no-element-type-checking gap: `["x", 5]` is now REJECTED with the codec's own sentence instead of arriving as `[0, 5]` |
+
+**Everything else in the contract is byte-identical, and that is the assertion
+worth reading.** `echo_strings` (`[tstr]` → QStringList), `attributes`
+(`{tstr: any}` → QVariantMap), `describe` (`any` → QVariant), `bounds`
+(`[Point]` → QList<Point>), `fetch` (`result`), `reset` (`void`) and every
+scalar did not move — QStringList is already in that closed set, and every
+`any`-bottomed shape deliberately keeps the QVariant spelling because QVariant
+is the only Qt type that holds bytes AND an exact uint64 AND arbitrary nesting.

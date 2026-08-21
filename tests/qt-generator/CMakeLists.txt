@@ -244,6 +244,50 @@ target_link_libraries(qtgen_origin_umbrella_tu PRIVATE
     Qt${QT_VERSION_MAJOR}::Core
 )
 
+# --- 6. the widened types round-trip REAL VALUES through the emitted code -----
+#
+# Everything above reads the generator's TEXT or hands it to a compiler. Neither
+# catches the failure this backend's type mapping actually has, because it is
+# not a compile error and not a diff: `QVariant::fromValue(QList<qulonglong>)`
+# compiles, produces a QVariant, and serialises to JSON **null** — logos-
+# protocol's qvariantToNlohmann matches a CLOSED userType() set that
+# QList<qulonglong> is not in. The other direction is just as quiet:
+# qvariant_cast back from a QVariantList yields an EMPTY list. A wrapper built
+# that way passes every assertion in this file and loses the payload of every
+# typed call.
+#
+# So this one EXECUTES the generated code. `roundtrip_tu.cpp` #includes the
+# generated .cpp (the umbrella_tu trick, which is what makes the file-local
+# record codecs reachable) and pushes boundary values through them: 2^64-1,
+# bytes with an embedded NUL and a high byte, empty vs present optionals,
+# nested containers, and the mistyped elements that must be refused rather than
+# coerced.
+#
+# It LINKS, unlike the two compile-only targets above — the generated method
+# bodies call the bridge, so this also proves the widened wrappers resolve.
+set(_rt_dir ${CMAKE_CURRENT_BINARY_DIR}/roundtrip_tu)
+set(_rt_generated ${_rt_dir}/widened_module_api.cpp ${_rt_dir}/widened_module_api.h)
+
+add_custom_command(
+    OUTPUT ${_rt_generated}
+    COMMAND ${LOGOS_QT_GENERATOR} --lidl ${_fixtures}/widened_module.lidl
+            --backend consumer --module widened_module --output-dir ${_rt_dir}
+    DEPENDS ${_fixtures}/widened_module.lidl
+    COMMENT "Generating the widened-types consumer wrapper for the round-trip test"
+)
+add_custom_target(qtgen_roundtrip_sources DEPENDS ${_rt_generated})
+
+add_executable(qtgen_roundtrip_tests ${CMAKE_CURRENT_SOURCE_DIR}/roundtrip_tu.cpp)
+add_dependencies(qtgen_roundtrip_tests qtgen_roundtrip_sources)
+target_include_directories(qtgen_roundtrip_tests PRIVATE ${_rt_dir})
+target_link_libraries(qtgen_roundtrip_tests PRIVATE
+    logos_qt_sdk
+    GTest::gtest
+    GTest::gtest_main
+    Qt${QT_VERSION_MAJOR}::Core
+)
+gtest_discover_tests(qtgen_roundtrip_tests)
+
 # --- 4. --backend ui: the view plugin's host-facing surface -------------------
 #
 # This backend had NO test at all, which is how it came to be the one generated

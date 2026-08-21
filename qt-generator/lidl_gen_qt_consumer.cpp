@@ -98,22 +98,25 @@ QString recFromWireFn(const QString& r) { return "recFromWire_" + r; }
 //
 // `qual` qualifies a nested record where class scope does not apply — a return
 // type written before the `Class::` of a definition.
+//
+// The qualification is handed to lidlTypeToQt as a HOOK rather than pattern-
+// matched on the finished string. It used to be the latter, matching the three
+// shapes that could mention a record (`Point`, `QList<Point>`,
+// `QMap<QString, Point>`); the widened table can also produce `?Point`,
+// `QList<QList<Point>>` and `QMap<QString, ?Point>`, and a string match would
+// have emitted those unqualified — which compiles inside the class and fails
+// outside it, i.e. in exactly half the emission sites.
 QString surfaceType(const ModuleDecl& m, const TypeExpr& te, const QString& qual, bool paramPosition)
 {
-    QString elem;
-    switch (recordShape(m, te, &elem)) {
-    case RecShape::Scalar: return qual + elem;
-    case RecShape::List:   return "QList<" + qual + elem + ">";
-    case RecShape::Map:    return "QMap<QString, " + qual + elem + ">";
-    case RecShape::None:   break;
-    }
-    const QString t = lidlTypeToQt(te);
+    const QString t = lidlTypeToQt(te, [&](const QString& n) {
+        return isRecordName(m, n.toStdString()) ? qual + n : n;
+    });
     // The one position-dependent spelling on the shipped surface: a `result`
     // RETURN is `LogosResult`, but a `result` PARAMETER has always been
     // `QVariant` (the legacy param table simply had no LogosResult entry).
     // Reproduced deliberately — this generator's contract is that no call site
     // moves, so an accidental "improvement" here would be a break.
-    if (paramPosition && t == "LogosResult") return "QVariant";
+    if (paramPosition && t == "LogosResult") return QStringLiteral("QVariant");
     return t;
 }
 
@@ -121,9 +124,16 @@ QString surfaceType(const ModuleDecl& m, const TypeExpr& te, const QString& qual
 // LogosResult are by VALUE — that is what shipped, and widening it would change
 // overload resolution and address-of at existing call sites. Records are
 // structs and were always by const-ref.
+//
+// The typed containers and optionals are NEW spellings — no call site can have
+// been written against them — so they take the convention their shape asks for
+// rather than a frozen one: a QList / QMap / std::optional is a container, and
+// containers here go by const-ref.
 bool byRef(const ModuleDecl& m, const TypeExpr& te, const QString& cppType)
 {
     if (recordShape(m, te, nullptr) != RecShape::None) return true;
+    if (cppType.startsWith("QList<") || cppType.startsWith("QMap<")
+        || cppType.startsWith("std::optional<")) return true;
     return cppType == "QString" || cppType == "QStringList"
         || cppType == "QJsonArray" || cppType == "QVariantList" || cppType == "QVariantMap";
 }
@@ -134,21 +144,67 @@ QString declParam(const ModuleDecl& m, const TypeExpr& te, const QString& name)
     return byRef(m, te, t) ? "const " + t + "& " + name : t + " " + name;
 }
 
+// A field's `?T` as a TypeExpr, whichever of the two spellings the author used.
+// `? name: T` sets the flag and leaves the type T; `name: ?T` leaves the flag
+// false and makes the type an Optional. Building ONE shape here is what makes
+// the two emit identical code.
+TypeExpr fieldOptionalType(const FieldDecl& f)
+{
+    if (f.type.kind == TypeExpr::Optional) return f.type;
+    TypeExpr o;
+    o.kind = TypeExpr::Optional;
+    o.elements.push_back(f.type);
+    return o;
+}
+
 // The surface spelling of a record FIELD, honouring BOTH optionality spellings.
 //
 // `? name: T` and `name: ?T` mean the same thing and must produce identical
 // code; only fieldIsOptional() reconciles them, so a backend that reads
 // `f.optional` or `f.type.kind` directly is the drift this exists to prevent.
-// An optional field is QVariant on the Qt surface for the same reason `?T` is
-// everywhere else here: Qt has no optional template, and QVariant already has
-// exactly one empty inhabitant to carry the empty state.
+//
+// An optional field is std::optional<T> — the same answer every other `?T` slot
+// now gets, and the same one the std surface has always given. It used to be a
+// bare QVariant, so a consumer reading `Profile.nickname` could not tell a
+// `?tstr` from a `?uint` without asking the contract. `?any` stays QVariant:
+// `any` is the one row the table keeps untyped, and QVariant already has
+// exactly one empty inhabitant, so wrapping it would spell EMPTY twice.
 QString fieldSurfaceType(const ModuleDecl& m, const FieldDecl& f, const QString& qual)
 {
-    if (fieldIsOptional(f)) return "QVariant";
+    if (fieldIsOptional(f))
+        return surfaceType(m, fieldOptionalType(f), qual, /*paramPosition=*/true);
     return surfaceType(m, f.type, qual, /*paramPosition=*/true);
 }
 
 // ── the two conversion spellings ────────────────────────────────────────────
+
+// True when this slot must be encoded/decoded ELEMENT BY ELEMENT rather than
+// handed to toWire / fromWire<T> whole.
+//
+// Two reasons, and they are now one question:
+//   * it mentions a RECORD — a struct with no Q_DECLARE_METATYPE;
+//   * its Qt spelling is a TYPED container or a std::optional, which QVariant
+//     handles worse still. logos::qvariantToNlohmann matches a CLOSED
+//     userType() set (QByteArray, LogosResult, the integer types, QStringList,
+//     QVariantList, QVariantMap, the QJson types). QList<qulonglong> matches
+//     NONE of them, so `toWire(QVariant::fromValue(list))` serialises to JSON
+//     null, and coming back `qvariant_cast<QList<qulonglong>>` of a
+//     QVariantList yields an EMPTY list. Both directions, silently.
+//
+// QStringList / QVariantList / QVariantMap / QVariant are NOT in this set: they
+// are in that closed set and cross whole, exactly as they always did.
+bool needsElementLoop(const ModuleDecl& m, const TypeExpr& te)
+{
+    return recordShape(m, te, nullptr) != RecShape::None || lidlQtNeedsElementLoop(te);
+}
+
+// An element whose decode goes through the strict leaf decoder — i.e. neither a
+// record (which has its own generated codec) nor a nested container/optional
+// (which recurses into a loop of its own).
+bool isCheckedLeaf(const ModuleDecl& m, const TypeExpr& te)
+{
+    return !needsElementLoop(m, te);
+}
 
 QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr)
 {
@@ -166,12 +222,60 @@ QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr)
     case RecShape::None:
         break;
     }
+    // The typed containers and optionals, the same loop shapes as the record
+    // cases above — those ARE the pattern, and there is deliberately only one.
+    //
+    // THE SOURCE IS A LAMBDA PARAMETER, never a local bound inside the body.
+    // These loops NEST — `[[uint]]` puts one inside another — and every level
+    // wants the same short names. A local (`const auto& __c = __c;`) or a
+    // range-for over a name the loop itself declares is then self-referential:
+    // it compiles, and it reads uninitialised memory. Passing the source as an
+    // ARGUMENT evaluates it in the ENCLOSING scope, before the inner names
+    // exist, so shadowing is harmless by construction. (Measured: the first
+    // draft bound a local and three round-trip tests died on SIGTRAP.)
+    if (lidlQtNeedsElementLoop(te)) {
+        if (te.kind == TypeExpr::Array) {
+            return "[&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); "
+                   "for (const auto& __e : __c) __acc.push_back("
+                 + toWire(m, te.elements[0], "__e") + "); return __acc; }(" + expr + ")";
+        }
+        if (te.kind == TypeExpr::Map) {
+            return "[&](const auto& __c){ nlohmann::json __acc = nlohmann::json::object(); "
+                   "for (auto __i = __c.cbegin(); __i != __c.cend(); ++__i) "
+                   "__acc[__i.key().toStdString()] = "
+                 + toWire(m, te.elements[1], "__i.value()") + "; return __acc; }(" + expr + ")";
+        }
+        if (te.kind == TypeExpr::Optional) {
+            // EMPTY is JSON null, the wire's single empty inhabitant, which
+            // Codec<std::optional<T>> reads back as nullopt. A record FIELD
+            // omits its key instead — see the field emission below; that is a
+            // property of named slots, not of `?T`.
+            return "[&](const auto& __c){ return __c.has_value() ? nlohmann::json("
+                 + toWire(m, optionalValueType(te), "*__c")
+                 + ") : nlohmann::json(nullptr); }(" + expr + ")";
+        }
+    }
     // QVariant::fromValue makes the argument exactly ONE value — a bare
     // QVariantList-typed arg would otherwise be spread across the args array
     // (the historical "typed arrays arrive empty over the Qt path" bug). It is
     // a no-op for an already-QVariant (`any`) argument.
     return "logos::qt::toWire(QVariant::fromValue(" + expr + "))";
 }
+
+// The strict decode of ONE element, as a statement that assigns `dst` or bails
+// out of the surrounding loop with `bail`.
+//
+// This is where the "no element type-checking" defect is closed. A leaf goes
+// through logos::qt::tryFromWire, i.e. through THE CODEC — the same rule the
+// std consumer and the provider apply — so `["x", 5]` read as `[uint]` is
+// REJECTED with the codec's own sentence instead of arriving as [0, 5]. The
+// whole container is refused, not the one element: a container that silently
+// changed length would be the same class of lie in a different shape.
+//
+// `owner` names the wrapper class in the diagnostic; `te` is spelled in LIDL,
+// because the reader of a module log is looking at a contract, not at Qt.
+QString decodeElementStmt(const ModuleDecl& m, const TypeExpr& te, const QString& qual,
+                          const QString& src, const QString& dst, const QString& bail);
 
 QString fromWire(const ModuleDecl& m, const TypeExpr& te, const QString& json, const QString& qual)
 {
@@ -192,7 +296,51 @@ QString fromWire(const ModuleDecl& m, const TypeExpr& te, const QString& json, c
     case RecShape::None:
         break;
     }
+    // Same loops in reverse, and the same rule about the source: it is a lambda
+    // PARAMETER, so a nested level can reuse these names without the initialiser
+    // ever naming something the body itself declares.
+    if (lidlQtNeedsElementLoop(te)) {
+        const QString bail = "return " + cpp + "();";
+        if (te.kind == TypeExpr::Array) {
+            return "[&](const nlohmann::json& __s){ " + cpp
+                 + " __acc; if (!__s.is_array()) return __acc; for (const auto& __e : __s) { "
+                 + decodeElementStmt(m, te.elements[0], qual, "__e", "__v", bail)
+                 + " __acc.push_back(__v); } return __acc; }(" + json + ")";
+        }
+        if (te.kind == TypeExpr::Map) {
+            return "[&](const nlohmann::json& __s){ " + cpp
+                 + " __acc; if (!__s.is_object()) return __acc; "
+                   "for (auto __i = __s.begin(); __i != __s.end(); ++__i) { "
+                   "const nlohmann::json& __e = __i.value(); "
+                 + decodeElementStmt(m, te.elements[1], qual, "__e", "__v", bail)
+                 + " __acc.insert(QString::fromStdString(__i.key()), __v); } return __acc; }("
+                 + json + ")";
+        }
+        if (te.kind == TypeExpr::Optional) {
+            // JSON null IS the empty state. An absent record KEY lands here too
+            // — the field decode below only enters on `contains`, so absent
+            // keeps the default, which is the same empty optional.
+            return "[&](const nlohmann::json& __s){ if (__s.is_null()) return " + cpp + "(); "
+                 + decodeElementStmt(m, optionalValueType(te), qual, "__s", "__v", bail)
+                 + " return " + cpp + "(__v); }(" + json + ")";
+        }
+    }
     return "logos::qt::fromWire<" + cpp + ">(" + json + ")";
+}
+
+QString decodeElementStmt(const ModuleDecl& m, const TypeExpr& te, const QString& qual,
+                          const QString& src, const QString& dst, const QString& bail)
+{
+    const QString cpp = surfaceType(m, te, qual, /*paramPosition=*/false);
+    if (!isCheckedLeaf(m, te)) {
+        // A record or a nested container: it owns its own decode (and its own
+        // checking, one level down).
+        return cpp + " " + dst + " = " + fromWire(m, te, src, qual) + ";";
+    }
+    const QString owner = qual.endsWith("::") ? qual.left(qual.size() - 2) : qual;
+    return cpp + " " + dst + "{}; std::string __why; if (!logos::qt::tryFromWire(" + src + ", "
+         + dst + ", &__why)) { qWarning() << \"" + owner + ": rejected a `"
+         + lidlTypeToLidlText(te) + "` element:\" << QString::fromStdString(__why); " + bail + " }";
 }
 
 bool isVoid(const TypeExpr& te)
@@ -215,6 +363,34 @@ QString eventCbParams(const ModuleDecl& m, const EventDecl& ev)
     QStringList parts;
     for (const ParamDecl& p : ev.params) parts << declParam(m, p.type, qs(p.name));
     return parts.join(", ");
+}
+
+// Does any slot in this contract materialise a std::optional on the surface?
+// Gates the generated `#include <optional>`, so a contract with no optional —
+// or one whose only optionals are `?any`, which stays QVariant — keeps its
+// header byte-for-byte what it was.
+bool typeUsesStdOptional(const TypeExpr& te)
+{
+    if (te.kind == TypeExpr::Optional && lidlQtNeedsElementLoop(te)) return true;
+    for (const TypeExpr& e : te.elements)
+        if (typeUsesStdOptional(e)) return true;
+    return false;
+}
+
+bool moduleUsesStdOptional(const ModuleDecl& m)
+{
+    for (const TypeDecl& t : m.types)
+        for (const FieldDecl& f : t.fields) {
+            const TypeExpr eff = fieldIsOptional(f) ? fieldOptionalType(f) : f.type;
+            if (typeUsesStdOptional(eff)) return true;
+        }
+    for (const MethodDecl& md : m.methods) {
+        if (typeUsesStdOptional(md.returnType)) return true;
+        for (const ParamDecl& p : md.params) if (typeUsesStdOptional(p.type)) return true;
+    }
+    for (const EventDecl& ed : m.events)
+        for (const ParamDecl& p : ed.params) if (typeUsesStdOptional(p.type)) return true;
+    return false;
 }
 
 }  // namespace
@@ -266,6 +442,7 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
     s << "#include <QVariantMap>\n";
     s << "#include <functional>\n";
     s << "#include <utility>\n";
+    if (moduleUsesStdOptional(module)) s << "#include <optional>\n";
     s << "#include \"logos_types.h\"\n";
     // The LogosAPI-free flavour names neither LogosAPI nor LogosAPIClient, so
     // it includes neither. `Timeout` (every method's trailing deadline) then
@@ -476,8 +653,19 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
                     // omitting is what the C++ and Rust encoders already do, and
                     // sending the key back means a round-tripped record is
                     // byte-identical to the one that was received.
-                    s << "    if (" << fv << ".isValid()) __j[\"" << qs(f.name) << "\"] = "
-                      << toWire(module, f.type, fv) << ";\n";
+                    //
+                    // The emptiness TEST follows the field's own spelling:
+                    // `.has_value()` for a std::optional, `.isValid()` for the
+                    // `?any` slot that is still a QVariant. Those are the only
+                    // two types this surface produces for an optional field.
+                    const TypeExpr ot = fieldOptionalType(f);
+                    if (lidlQtNeedsElementLoop(ot)) {
+                        s << "    if (" << fv << ".has_value()) __j[\"" << qs(f.name) << "\"] = "
+                          << toWire(module, fieldValueType(f), "*" + fv) << ";\n";
+                    } else {
+                        s << "    if (" << fv << ".isValid()) __j[\"" << qs(f.name) << "\"] = "
+                          << toWire(module, f.type, fv) << ";\n";
+                    }
                 } else {
                     s << "    __j[\"" << qs(f.name) << "\"] = "
                       << toWire(module, f.type, fv) << ";\n";
@@ -494,12 +682,14 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             s << "    if (!w.is_object()) return __out;\n";
             for (const FieldDecl& f : t.fields) {
                 const QString src = "w.at(\"" + qs(f.name) + "\")";
-                // An optional field decodes to a bare QVariant: null becomes the
-                // invalid QVariant, which IS its empty inhabitant, so an absent
-                // key and a null key land on the same value — and the surrounding
-                // `contains` guard keeps a missing key at the default.
+                // An optional field decodes through the optional path: a JSON
+                // null becomes the empty optional (or, for `?any`, the invalid
+                // QVariant, which IS that spelling's empty inhabitant), so an
+                // absent key and a null key land on the same value — and the
+                // surrounding `contains` guard keeps a missing key at the
+                // default, which is that same empty state.
                 const QString expr = fieldIsOptional(f)
-                                         ? "logos::qt::fromWire<QVariant>(" + src + ")"
+                                         ? fromWire(module, fieldOptionalType(f), src, qual)
                                          : fromWire(module, f.type, src, qual);
                 s << "    if (w.contains(\"" << qs(f.name) << "\")) __out." << qs(f.name)
                   << " = " << expr << ";\n";
