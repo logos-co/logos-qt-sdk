@@ -151,6 +151,61 @@ bool tryFromWire(const nlohmann::json& j, T& out, std::string* reason = nullptr)
     }
 }
 
+// ── shape checks, for the generator's container loops ───────────────────────
+//
+// A typed container declares a SHAPE as well as an element type: `[T]` is a JSON
+// array, `{tstr: T}` a JSON object. The generated loops used to answer a
+// wrong-shaped response with an empty container and no diagnostic — the same
+// silent-empty the element check above closed one level down, and just as
+// invisible to a caller who reads `err.ok()`.
+//
+// The check is the CODEC's own (logos::jsonRequireArray / jsonRequireObject), so
+// a Qt consumer reports a wrong-shaped `[uint]` with the sentence every std
+// consumer of that contract already reports.
+inline bool tryRequireArray(const nlohmann::json& j, std::string* reason = nullptr)
+{
+    try {
+        logos::jsonRequireArray(j, std::string());
+        return true;
+    } catch (const logos::CodecError& e) {
+        if (reason) *reason = e.what();
+        return false;
+    }
+}
+
+inline bool tryRequireObject(const nlohmann::json& j, std::string* reason = nullptr)
+{
+    try {
+        logos::jsonRequireObject(j, std::string());
+        return true;
+    } catch (const logos::CodecError& e) {
+        if (reason) *reason = e.what();
+        return false;
+    }
+}
+
+// ── the decode-error sink ───────────────────────────────────────────────────
+//
+// Where a generated decode records a rejection, so it can reach the caller's
+// `logos::CallError*` instead of only a qWarning. Without it a container whose
+// elements were REFUSED and a container the provider legitimately sent empty are
+// the same answer, reported as success — the silent-empty-with-ok that the
+// element check alone did not close.
+//
+// FIRST REJECTION WINS. A decode walks the whole value, so a single mistyped
+// element can be followed by many more; the first one names the actual mismatch,
+// and the ones after it are noise. (An empty sink means "nothing recorded": a
+// codec diagnostic is never the empty string.)
+//
+// A null sink is the normal state on the surfaces that have nowhere to put an
+// error — the value-only async callback, an event delivery, a record codec
+// called directly — and is silently ignored, exactly as `reason` is above.
+inline void noteDecodeError(std::string* sink, std::string message)
+{
+    if (!sink || !sink->empty()) return;
+    *sink = std::move(message);
+}
+
 }  // namespace qt
 }  // namespace logos
 

@@ -76,12 +76,12 @@ bool isRecordName(const ModuleDecl& m, const std::string& n)
 // It used to answer the composite shapes too (a `RecShape` of None / Scalar /
 // List / Map), because `QList<Foo>` and `QMap<QString, Foo>` each had their own
 // hand-written encode and decode loop beside the generic ones. That duplication
-// was the defect: those two loops INLINED their source expression instead of
-// passing it as a lambda argument, so `{tstr: {tstr: Foo}}` emitted
+// was the whole of defect D2: those two loops INLINED their source expression
+// instead of passing it as a lambda argument, so `{tstr: {tstr: Foo}}` emitted
 // `for (auto __i = __i.value().cbegin(); ...)` — `__i` in its own initialiser —
-// and `?{tstr: Foo}` emitted `*x.cbegin()`, which parses as `*(x.cbegin())` and
-// asks a std::optional for an iterator. Neither compiles; no fixture had either
-// shape.
+// and `?{tstr: Foo}` emitted `*__c.cbegin()`, which parses as `*(__c.cbegin())`
+// and asks a std::optional for an iterator. Neither compiles; no fixture had
+// either shape.
 //
 // The generic container loops below already produce byte-identical code for
 // `[Foo]` and `{tstr: Foo}` — they recurse, and the recursion lands on the
@@ -256,6 +256,48 @@ QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr)
     return "logos::qt::toWire(QVariant::fromValue(" + expr + "))";
 }
 
+// ── the decode-error sink ───────────────────────────────────────────────────
+//
+// THE NAME every emitted decode writes its first rejection into: a
+// `std::string*`, possibly null, declared by whatever is evaluating the decode
+// expression (a record codec's parameter, a method body, a callback).
+//
+// Threaded as a NAME rather than as another argument because a decode
+// expression is a tree of `[&]` lambdas of unbounded depth, and `[&]` makes an
+// enclosing declaration visible at every level of it for free. Every emission
+// site below declares it — grep for `declareSink`.
+//
+// WHY IT EXISTS. Element checking without it is only half a fix: a container
+// whose elements were REFUSED and a container the provider legitimately sent
+// empty came back as the same value, and `err.ok()` was true for both. A
+// thousand-element list with one bad element became `[]`, reported as success.
+// The qWarning said so in the log, which is not a channel a caller can branch
+// on — and the std consumer of the same contract THREW for that input, so the
+// two surfaces disagreed about whether a mistyped element is an error at all.
+const char* const kSink = "__derr";
+
+// `owner` names the wrapper class in a diagnostic; `te` is spelled in LIDL,
+// because the reader of a module log is looking at a contract, not at Qt.
+QString ownerOf(const QString& qual)
+{
+    return qual.endsWith("::") ? qual.left(qual.size() - 2) : qual;
+}
+
+// The rejection statement pair: record it on the error channel, say it in the
+// log, then leave. `__why` is the codec's own sentence and must be in scope.
+//
+// BOTH, not one or the other. The qWarning is what a developer watching a
+// module sees without changing any code; the sink is what a caller who passed
+// `&err` can branch on. Dropping either one takes back half of the fix.
+QString rejectStmt(const QString& owner, const QString& lidl, const QString& what,
+                   const QString& bail)
+{
+    const QString head = owner + ": rejected a `" + lidl + "` " + what + ":";
+    return QString("logos::qt::noteDecodeError(%1, \"%2 \" + __why); qWarning() << \"%2\" "
+                   "<< QString::fromStdString(__why); %3")
+        .arg(kSink, head, bail);
+}
+
 // The strict decode of ONE element, as a statement that assigns `dst` or bails
 // out of the surrounding loop with `bail`.
 //
@@ -266,42 +308,70 @@ QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr)
 // whole container is refused, not the one element: a container that silently
 // changed length would be the same class of lie in a different shape.
 //
-// `owner` names the wrapper class in the diagnostic; `te` is spelled in LIDL,
-// because the reader of a module log is looking at a contract, not at Qt.
+// `__why` is NOT declared here. The enclosing container loop declares it once
+// and the shape check uses it too, so declaring it per element would shadow
+// that one — legal, and a -Wshadow warning in generated code.
 QString decodeElementStmt(const ModuleDecl& m, const TypeExpr& te, const QString& qual,
                           const QString& src, const QString& dst, const QString& bail);
 
+// Does the decode of `te` mention the sink? True exactly when something inside
+// it can REJECT: a record (whose codec takes the sink) or a typed container
+// (whose loop writes to it). A scalar, or anything bottoming out at `any`, goes
+// through the lenient `fromWire<T>` and names nothing — so the sink must not be
+// declared for it either, or the declaration is an unused variable.
+bool decodeUsesSink(const ModuleDecl& m, const TypeExpr& te)
+{
+    return needsElementLoop(m, te);
+}
+
 QString fromWire(const ModuleDecl& m, const TypeExpr& te, const QString& json, const QString& qual)
 {
-    if (isRecordType(m, te)) return recFromWireFn(qs(te.name)) + "(" + json + ")";
+    // A record's own codec, which takes the sink so a rejection INSIDE a record
+    // field reaches the same channel as one in a bare container.
+    if (isRecordType(m, te))
+        return recFromWireFn(qs(te.name)) + "(" + json + ", " + kSink + ")";
 
     const QString cpp = surfaceType(m, te, qual, /*paramPosition=*/false);
     // Same loops in reverse, and the same rule about the source: it is a lambda
     // PARAMETER, so a nested level can reuse these names without the initialiser
     // ever naming something the body itself declares.
     if (lidlQtNeedsElementLoop(te)) {
-        const QString bail = "return " + cpp + "();";
+        const QString bail = "return __acc;";
+        const QString owner = ownerOf(qual);
+        const QString lidl = lidlTypeToLidlText(te);
         if (te.kind == TypeExpr::Array) {
-            return "[&](const nlohmann::json& __s){ " + cpp
-                 + " __acc; if (!__s.is_array()) return __acc; for (const auto& __e : __s) { "
-                 + decodeElementStmt(m, te.elements[0], qual, "__e", "__v", bail)
+            // The SHAPE is part of the declared type, so a non-array is a
+            // rejection and not an empty list. `__why` is declared once and
+            // reused by the element decode inside the loop.
+            return "[&](const nlohmann::json& __s){ " + cpp + " __acc; std::string __why; "
+                   "if (!logos::qt::tryRequireArray(__s, &__why)) { "
+                 + rejectStmt(owner, lidl, "value", bail) + " } for (const auto& __e : __s) { "
+                 + decodeElementStmt(m, te.elements[0], qual, "__e", "__v", "return " + cpp + "();")
                  + " __acc.push_back(__v); } return __acc; }(" + json + ")";
         }
         if (te.kind == TypeExpr::Map) {
-            return "[&](const nlohmann::json& __s){ " + cpp
-                 + " __acc; if (!__s.is_object()) return __acc; "
-                   "for (auto __i = __s.begin(); __i != __s.end(); ++__i) { "
+            return "[&](const nlohmann::json& __s){ " + cpp + " __acc; std::string __why; "
+                   "if (!logos::qt::tryRequireObject(__s, &__why)) { "
+                 + rejectStmt(owner, lidl, "value", bail)
+                 + " } for (auto __i = __s.begin(); __i != __s.end(); ++__i) { "
                    "const nlohmann::json& __e = __i.value(); "
-                 + decodeElementStmt(m, te.elements[1], qual, "__e", "__v", bail)
+                 + decodeElementStmt(m, te.elements[1], qual, "__e", "__v", "return " + cpp + "();")
                  + " __acc.insert(QString::fromStdString(__i.key()), __v); } return __acc; }("
                  + json + ")";
         }
         if (te.kind == TypeExpr::Optional) {
-            // JSON null IS the empty state. An absent record KEY lands here too
-            // — the field decode below only enters on `contains`, so absent
-            // keeps the default, which is the same empty optional.
-            return "[&](const nlohmann::json& __s){ if (__s.is_null()) return " + cpp + "(); "
-                 + decodeElementStmt(m, optionalValueType(te), qual, "__s", "__v", bail)
+            // JSON null IS the empty state — no shape to check, and nothing to
+            // reject. An absent record KEY lands here too: the field decode
+            // below only enters on `contains`, so absent keeps the default,
+            // which is that same empty optional.
+            //
+            // `__why` is declared only when the value decodes through the leaf
+            // decoder; a nested container or a record brings its own.
+            const TypeExpr vt = optionalValueType(te);
+            const QString why = isCheckedLeaf(m, vt) ? QStringLiteral("std::string __why; ")
+                                                     : QString();
+            return "[&](const nlohmann::json& __s){ if (__s.is_null()) return " + cpp + "(); " + why
+                 + decodeElementStmt(m, vt, qual, "__s", "__v", "return " + cpp + "();")
                  + " return " + cpp + "(__v); }(" + json + ")";
         }
     }
@@ -314,13 +384,36 @@ QString decodeElementStmt(const ModuleDecl& m, const TypeExpr& te, const QString
     const QString cpp = surfaceType(m, te, qual, /*paramPosition=*/false);
     if (!isCheckedLeaf(m, te)) {
         // A record or a nested container: it owns its own decode (and its own
-        // checking, one level down).
+        // checking, and its own rejection, one level down).
         return cpp + " " + dst + " = " + fromWire(m, te, src, qual) + ";";
     }
-    const QString owner = qual.endsWith("::") ? qual.left(qual.size() - 2) : qual;
-    return cpp + " " + dst + "{}; std::string __why; if (!logos::qt::tryFromWire(" + src + ", "
-         + dst + ", &__why)) { qWarning() << \"" + owner + ": rejected a `"
-         + lidlTypeToLidlText(te) + "` element:\" << QString::fromStdString(__why); " + bail + " }";
+    return cpp + " " + dst + "{}; if (!logos::qt::tryFromWire(" + src + ", " + dst + ", &__why)) { "
+         + rejectStmt(ownerOf(qual), lidlTypeToLidlText(te), "element", bail) + " }";
+}
+
+// `std::string* __derr = <init>;` — the declaration every context that evaluates
+// a decode expression needs. Emitted only where the decode can actually reject
+// (see decodeUsesSink), because an unused one is a warning in generated code.
+QString declareSink(const QString& init)
+{
+    return QString("std::string* %1 = %2;").arg(kSink, init);
+}
+
+// A record's field type as the emitter sees it — the two optionality spellings
+// reconciled into one shape, exactly as fieldSurfaceType does for the surface.
+TypeExpr effectiveFieldType(const FieldDecl& f)
+{
+    return fieldIsOptional(f) ? fieldOptionalType(f) : f.type;
+}
+
+// Does THIS record's decode name the sink? Only then is its parameter given a
+// name; a record of plain scalars leaves it unnamed, so the generated codec has
+// no unused parameter and needs no `(void)` line to say so.
+bool recordDecodeUsesSink(const ModuleDecl& m, const TypeDecl& t)
+{
+    for (const FieldDecl& f : t.fields)
+        if (decodeUsesSink(m, effectiveFieldType(f))) return true;
+    return false;
 }
 
 bool isVoid(const TypeExpr& te)
@@ -382,18 +475,27 @@ bool moduleUsesStdOptional(const ModuleDecl& m)
 // reported itself to a non-Rust caller — so "found nothing" and "the call
 // failed" were the same answer.
 //
-// Neither half of that is true on the path this generator emits for.
+// The ambiguity is not GONE. It is RESOLVABLE, by opting in — which is a real
+// difference from a refusal, and a different claim from "the two can never be
+// confused". Stated exactly, because the gate was lifted on the strength of it:
 //
-//   * FAILURE IS NOT SIGNALLED BY THE VALUE. A generated body calls
+//   * FAILURE DOES NOT TRAVEL IN THE VALUE. A generated body calls
 //     logos::qt::invoke -> logos::LpClient::invoke, which decides success from
 //     the C ABI's return code (`rc == LP_OK`) and never from the result's
-//     null-ness — see logos-cpp-sdk's logos_lp_client.h. A successful call
-//     returning null arrives with `err.ok()` true; a failed one arrives with
-//     `err` populated. The two ARE distinguishable, on both the sync and the
-//     result-carrying async surfaces.
-//   * THE VALUE IS NOT DEFAULT-CONSTRUCTED EITHER. `?T` is std::optional<T>
-//     now, so the empty answer is std::nullopt — distinct from T{}, which is
-//     what a bare QVariant return could not express.
+//     null-ness — see logos-cpp-sdk's logos_lp_client.h. It travels on a second
+//     channel, `logos::CallError`, filled from a source independent of the
+//     value — and, since the element loops gained a sink, that channel also
+//     carries a decode rejection.
+//   * THAT CHANNEL IS DEFAULTED OFF. The sync signature ends
+//     `logos::CallError* err = nullptr`, so a caller who passes nothing still
+//     sees ONE value — an empty optional — for both "found nothing" and "the
+//     call failed", plus a qWarning no code can branch on. The same choice is
+//     spelled as an overload on the async side: `<name>Async` hands over a bare
+//     value and cannot distinguish them, `<name>AsyncResult` carries the error.
+//   * THE EMPTY ANSWER IS EXPRESSIBLE, unconditionally. `?T` is
+//     std::optional<T> now, so the empty answer is std::nullopt — distinct from
+//     T{}, which is what a bare QVariant return could not express. This one
+//     holds whether or not the caller takes the error.
 //
 // One null-means-failure rule does survive, and it is worth naming rather than
 // leaving for someone to rediscover: logoscore's core_service turns a null
@@ -615,14 +717,61 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "#endif  // LOGOS_GENERATED_DISPATCH_REJECTION_JSON\n\n";
     }
 
+    // The other half of the error channel: a rejection the generated ELEMENT
+    // loops recorded, folded into the caller's CallError.
+    //
+    // A decode rejection is NOT a transport failure and not a provider
+    // rejection — the call reached the module, the module answered, and the
+    // answer does not match the contract this wrapper was generated from. It
+    // needs its own code, and "decode_failed" is it. (logos_call_error.h lists
+    // the codes its own canonical constructors produce; this one is detected
+    // HERE, by generated code, exactly as "dispatch_failed" is above, so it has
+    // no constructor there to call.)
+    //
+    // Never overwrites an error already on the channel: a transport failure or
+    // a provider rejection came first and describes the real cause, and the
+    // garbage that follows one is a consequence, not a second fault. `origin`
+    // is the TARGET module — the one whose answer was refused — read from
+    // m_moduleName so a runtime-bound wrapper names the module it actually
+    // called.
+    //
+    // Its own include guard, for the same reason the one above has one: the
+    // umbrella puts every dependency's wrapper .cpp in ONE translation unit.
+    // Emitted only when some method's return can reject, or it is an unused
+    // static function.
+    const bool anyReturnDecodes = [&] {
+        for (const MethodDecl& mtd : module.methods)
+            if (!isVoid(mtd.returnType) && decodeUsesSink(module, mtd.returnType)) return true;
+        return false;
+    }();
+    if (anyReturnDecodes) {
+        s << "#ifndef LOGOS_GENERATED_DECODE_FAILURE_JSON\n";
+        s << "#define LOGOS_GENERATED_DECODE_FAILURE_JSON\n\n";
+        s << "namespace {\n\n";
+        s << "void logosNoteDecodeFailure(const std::string& why, const std::string& origin,\n";
+        s << "                            logos::CallError& out)\n";
+        s << "{\n";
+        s << "    if (why.empty() || !out.ok()) return;\n";
+        s << "    out.code = \"decode_failed\";\n";
+        s << "    out.message = why;\n";
+        s << "    out.origin = origin;\n";
+        s << "}\n\n";
+        s << "} // namespace\n\n";
+        s << "#endif  // LOGOS_GENERATED_DECODE_FAILURE_JSON\n\n";
+    }
+
     // Record <-> canonical JSON. Declared up front so records can reference
     // each other (and themselves, through a list field) in any order.
     if (!module.types.empty()) {
         for (const TypeDecl& t : module.types) {
             s << "static nlohmann::json " << recToWireFn(qs(t.name))
               << "(const " << qual << qs(t.name) << "& v);\n";
+            // The sink is DEFAULTED here and only here — one default per
+            // function, and this declaration is what a hand-written caller
+            // (the round-trip test) sees, so `recFromWire_Bag(j)` keeps
+            // working while the generated call sites all pass it through.
             s << "static " << qual << qs(t.name) << " " << recFromWireFn(qs(t.name))
-              << "(const nlohmann::json& w);\n";
+              << "(const nlohmann::json& w, std::string* " << kSink << " = nullptr);\n";
         }
         s << "\n";
         for (const TypeDecl& t : module.types) {
@@ -662,7 +811,9 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             // A missing / mistyped field keeps its default rather than failing
             // the whole call — the same leniency the scalar paths have.
             s << "static " << qual << qs(t.name) << " " << recFromWireFn(qs(t.name))
-              << "(const nlohmann::json& w) {\n";
+              << "(const nlohmann::json& w, std::string*"
+              << (recordDecodeUsesSink(module, t) ? QString(" ") + kSink : QString())
+              << ") {\n";
             s << "    " << qual << qs(t.name) << " __out;\n";
             s << "    if (!w.is_object()) return __out;\n";
             for (const FieldDecl& f : t.fields) {
@@ -753,6 +904,16 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "    return logos::qt::subscribe(m_bridge, \"" << qs(ev.name)
           << "\", [callback](nlohmann::json _a) {\n";
         s << "        if (!_a.is_array() || _a.size() < " << ev.params.size() << ") return;\n";
+        // An event delivery has no error channel — nobody is waiting on a
+        // return — so the sink is null and a rejected argument is reported the
+        // only way it can be, in the log. The declaration still has to exist:
+        // the decode expressions below name it.
+        {
+            bool anyArgDecodes = false;
+            for (const ParamDecl& p : ev.params)
+                if (decodeUsesSink(module, p.type)) anyArgDecodes = true;
+            if (anyArgDecodes) s << "        " << declareSink("nullptr") << "\n";
+        }
         s << "        callback(";
         QStringList args;
         for (size_t i = 0; i < ev.params.size(); ++i)
@@ -783,6 +944,11 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
                 s << "    _args.push_back(" << toWire(module, p.type, qs(p.name)) << ");\n";
         };
 
+        // Can decoding this method's ANSWER reject? Only then does the body
+        // grow an error sink and the fold below it. A method returning a
+        // scalar, `any` or void emits exactly the lines it always did.
+        const bool retDecodes = !retVoid && decodeUsesSink(module, mtd.returnType);
+
         // Sync. The caller's Timeout is threaded into the C ABI's timeout_ms
         // just as the async paths do.
         {
@@ -800,10 +966,28 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "    if (err) *err = _err;\n";
         s << "    else if (!_err.ok()) qWarning() << \"" << className << "::" << qs(mtd.name)
           << ": remote call failed:\" << QString::fromStdString(_err.message);\n";
-        if (!retVoid)
+        if (retDecodes) {
+            // The decode runs into a NAMED local so its rejection can be folded
+            // afterwards. It cannot be folded before: the rejection is only
+            // known once the decode has walked the value.
+            //
+            // The fold is guarded on `err` — the error channel is opt-in, and a
+            // caller who did not ask for one already gets the qWarning the
+            // loops emit. That is the same rule the transport error above
+            // follows, and it is exactly what makes the empty-optional /
+            // failed-call ambiguity RESOLVABLE rather than resolved: pass
+            // `&err`, and the two are distinct.
+            s << "    std::string _derr;\n";
+            s << "    " << declareSink("&_derr") << "\n";
+            s << "    " << retQual << " _out = " << fromWire(module, mtd.returnType, "_r", qual)
+              << ";\n";
+            s << "    if (err) logosNoteDecodeFailure(_derr, m_moduleName.toStdString(), *err);\n";
+            s << "    return _out;\n";
+        } else if (!retVoid) {
             s << "    return " << fromWire(module, mtd.returnType, "_r", qual) << ";\n";
-        else
+        } else {
             s << "    (void)_r;\n";
+        }
         s << "}\n\n";
 
         // Async. The caller's Timeout is threaded into the C ABI's timeout_ms
@@ -826,10 +1010,17 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "            { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))\n";
         s << "                  qWarning() << \"" << className << "::" << qs(mtd.name)
           << "Async: remote call failed:\" << QString::fromStdString(_rej.message); }\n";
-        if (retVoid)
+        if (retVoid) {
             s << "            (void)_r; callback();\n";
-        else
+        } else {
+            // Same reason as the rejection fold above: this callback takes a
+            // bare value, so a decode rejection has nowhere to go but the log —
+            // which is where the element loops already put it. The sink is
+            // NULL rather than absent because the decode expression names it.
+            // `<name>AsyncResult` is the surface that reports it.
+            if (retDecodes) s << "            " << declareSink("nullptr") << "\n";
             s << "            callback(" << fromWire(module, mtd.returnType, "_r", qual) << ");\n";
+        }
         s << "        }, timeout.ms);\n";
         s << "}\n\n";
 
@@ -848,17 +1039,34 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "    if (!callback) return;\n";
         emitArgs();
         s << "    logos::qt::invokeAsyncResult(m_bridge, \"" << qs(mtd.name) << "\", _args,\n";
-        s << "        [callback](nlohmann::json _r, const logos::CallError& _err) {\n";
+        // The target's name is CAPTURED, not read off `this`: the callback runs
+        // after this function returns, and a wrapper is a copyable handle that
+        // may not outlive the call.
+        if (retDecodes)
+            s << "        [callback, _target = m_moduleName.toStdString()]"
+                 "(nlohmann::json _r, const logos::CallError& _err) {\n";
+        else
+            s << "        [callback](nlohmann::json _r, const logos::CallError& _err) {\n";
         s << "            logos::AsyncResult<" << ret << "> _res;\n";
         s << "            _res.error = _err;\n";
         // This is the surface that can report a rejection, and callers branch
         // on _res.ok(). Fold before the conversion below, or a rejected call
         // reports success with a default-constructed value.
         s << "            if (_res.error.ok()) logosDispatchRejectionJson(_r, _res.error);\n";
-        if (retVoid)
+        if (retVoid) {
             s << "            (void)_r;\n";
-        else
+        } else if (retDecodes) {
+            // This IS the async error channel, so the rejection is reported
+            // rather than only logged — unguarded, because a caller of this
+            // overload asked for the error by choosing it.
+            s << "            std::string _derr;\n";
+            s << "            " << declareSink("&_derr") << "\n";
+            s << "            _res.value = " << fromWire(module, mtd.returnType, "_r", qual)
+              << ";\n";
+            s << "            logosNoteDecodeFailure(_derr, _target, _res.error);\n";
+        } else {
             s << "            _res.value = " << fromWire(module, mtd.returnType, "_r", qual) << ";\n";
+        }
         s << "            callback(_res);\n";
         s << "        }, timeout.ms);\n";
         s << "}\n\n";

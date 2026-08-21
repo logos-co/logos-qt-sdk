@@ -275,6 +275,73 @@ TEST(WidenedRoundTrip, AStringElementInAUintArrayIsRejectedNotZeroed)
     EXPECT_TRUE(out.uints.isEmpty());
 }
 
+// ── the rejection reaches the ERROR CHANNEL, not only the log ───────────────
+//
+// The tests above assert that a bad element is REFUSED. That alone left the
+// second half of the same defect open: the refusal produced an empty container
+// and a qWarning, and a caller reading `err.ok()` saw SUCCESS — so a
+// thousand-element list with one bad element and a list the provider
+// legitimately sent empty were the same answer. The std consumer of the same
+// contract THREW for that input; the two surfaces disagreed about whether a
+// mistyped element is an error at all.
+//
+// `recFromWire_Bag`'s second parameter is that channel — the same `std::string*`
+// the generated method bodies declare and fold into `logos::CallError` — so the
+// rule can be stated here, on the emitted code, rather than only in generated
+// text nothing runs.
+TEST(WidenedRoundTrip, ARejectedElementReachesTheErrorChannel)
+{
+    nlohmann::json j = nlohmann::json::object();
+    j["uints"] = nlohmann::json::array({ "x", 5 });
+
+    std::string why;
+    const Bag out = recFromWire_Bag(j, &why);
+
+    EXPECT_TRUE(out.uints.isEmpty());
+    ASSERT_FALSE(why.empty()) << "silent-empty-with-ok: the caller cannot tell a refusal "
+                                 "from a list the provider really sent empty";
+    // The CODEC's own sentence, carried through rather than re-worded — the
+    // same text the std surface reports for this input.
+    EXPECT_NE(why.find("expected integer"), std::string::npos) << why;
+    EXPECT_NE(why.find("got string"), std::string::npos) << why;
+    // And the slot, spelled the way the CONTRACT spells it.
+    EXPECT_NE(why.find("`uint`"), std::string::npos) << why;
+    EXPECT_NE(why.find("WidenedModule"), std::string::npos) << why;
+}
+
+TEST(WidenedRoundTrip, AWrongShapedResponseReachesTheErrorChannel)
+{
+    // Not a bad element — a bad SHAPE. `[uint]` handed an object and
+    // `{tstr: uint}` handed an array both used to answer an empty container
+    // with nothing on the error channel.
+    {
+        nlohmann::json j = nlohmann::json::object();
+        j["uints"] = nlohmann::json::object();
+        std::string why;
+        const Bag out = recFromWire_Bag(j, &why);
+        EXPECT_TRUE(out.uints.isEmpty());
+        EXPECT_NE(why.find("expected array"), std::string::npos) << why;
+    }
+    {
+        nlohmann::json j = nlohmann::json::object();
+        j["counts"] = nlohmann::json::array({ 1 });
+        std::string why;
+        const Bag out = recFromWire_Bag(j, &why);
+        EXPECT_TRUE(out.counts.isEmpty());
+        EXPECT_NE(why.find("expected object"), std::string::npos) << why;
+    }
+}
+
+TEST(WidenedRoundTrip, AGoodValueLeavesTheErrorChannelClean)
+{
+    // The control for the two above: without it, both are satisfied by a sink
+    // that is filled on every decode.
+    std::string why;
+    const Bag out = recFromWire_Bag(recToWire_Bag(makeBag()), &why);
+    EXPECT_TRUE(why.empty()) << why;
+    EXPECT_EQ(out.uints, makeBag().uints);
+}
+
 // The same rule one level down, and through a map: the check is per ELEMENT at
 // every depth, not a shape check on the outermost container.
 TEST(WidenedRoundTrip, ElementCheckingReachesNestedContainers)

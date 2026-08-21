@@ -311,3 +311,111 @@ TEST(NestedShapes, ARecordOfRecordsSurvivesThroughAContainer)
     ASSERT_EQ(out.bag_of_recs.value(QStringLiteral("k")).size(), 1);
     EXPECT_DOUBLE_EQ(out.bag_of_recs.value(QStringLiteral("k")).at(0).ll.at(0).at(1).y, 4.0);
 }
+
+// ── the error channel (D5) ──────────────────────────────────────────────────
+//
+// A rejected element used to leave an empty container and a qWarning, and
+// nothing a caller could branch on: `err.ok()` was true. These assert the sink
+// the generated loops now write into — the same `std::string*` the method
+// bodies fold into `logos::CallError` — at each of the depths a rejection can
+// happen at.
+
+TEST(NestedDecodeErrors, ABadElementAtDepthTwoIsReported)
+{
+    nlohmann::json j = nlohmann::json::object();
+    j["ll"] = nlohmann::json::array({ nlohmann::json::array({ 1, "x" }) });
+
+    std::string why;
+    const UintNest out = recFromWire_UintNest(j, &why);
+
+    ASSERT_EQ(out.ll.size(), 1);
+    EXPECT_TRUE(out.ll.at(0).isEmpty()) << "the bad element must refuse the container";
+    EXPECT_FALSE(why.empty()) << "an empty sink is the silent-empty-with-ok defect";
+    EXPECT_NE(why.find("uint"), std::string::npos) << why;
+    EXPECT_NE(why.find("got string"), std::string::npos) << why;
+}
+
+TEST(NestedDecodeErrors, ABadElementAtDepthThreeIsReported)
+{
+    nlohmann::json j = nlohmann::json::object();
+    j["lll"] = nlohmann::json::array(
+        { nlohmann::json::array({ nlohmann::json::array({ 1, "x" }) }) });
+
+    std::string why;
+    const DeepNest out = recFromWire_DeepNest(j, &why);
+
+    ASSERT_EQ(out.lll.size(), 1);
+    ASSERT_EQ(out.lll.at(0).size(), 1);
+    EXPECT_TRUE(out.lll.at(0).at(0).isEmpty());
+    EXPECT_FALSE(why.empty()) << "depth three is still one loop, and must still report";
+    EXPECT_NE(why.find("got string"), std::string::npos) << why;
+}
+
+TEST(NestedDecodeErrors, AWrongShapedContainerIsReportedNotSilentlyEmpty)
+{
+    // `[[uint]]` handed an object, and `{tstr: uint}` handed a string: the
+    // SHAPE is as much part of the declared type as the element type is, and
+    // answering an empty container for either is the same silent lie.
+    {
+        nlohmann::json j = nlohmann::json::object();
+        j["ll"] = nlohmann::json::object();
+        std::string why;
+        const UintNest out = recFromWire_UintNest(j, &why);
+        EXPECT_TRUE(out.ll.isEmpty());
+        EXPECT_NE(why.find("expected array"), std::string::npos) << why;
+    }
+    {
+        nlohmann::json j = nlohmann::json::object();
+        j["ml"] = nlohmann::json::array({ 1 });
+        std::string why;
+        const UintNest out = recFromWire_UintNest(j, &why);
+        EXPECT_TRUE(out.ml.isEmpty());
+        EXPECT_NE(why.find("expected object"), std::string::npos) << why;
+    }
+    {
+        // The wrong shape one level IN: `[[uint]]` whose element is an object.
+        nlohmann::json j = nlohmann::json::object();
+        j["ll"] = nlohmann::json::array({ nlohmann::json::object() });
+        std::string why;
+        recFromWire_UintNest(j, &why);
+        EXPECT_NE(why.find("expected array"), std::string::npos) << why;
+    }
+}
+
+TEST(NestedDecodeErrors, TheFirstRejectionWins)
+{
+    nlohmann::json j = nlohmann::json::object();
+    j["ll"] = nlohmann::json::array({ nlohmann::json::array({ "first" }) });
+    j["ml"] = nlohmann::json::object({ { "k", nlohmann::json::array({ "second" }) } });
+
+    std::string why;
+    recFromWire_UintNest(j, &why);
+    ASSERT_FALSE(why.empty());
+    // Both slots reject; the sink keeps the one that names the actual mismatch
+    // a reader will chase, not the last one the walk happened to reach.
+    EXPECT_EQ(why.find("`[[uint]]`"), std::string::npos) << why;
+    EXPECT_NE(why.find("`uint`"), std::string::npos) << why;
+}
+
+TEST(NestedDecodeErrors, ANullSinkIsTheSurfaceWithNoErrorChannel)
+{
+    // Events and the value-only async callback have nowhere to put an error, so
+    // they pass a null sink. That must be a no-op, not a crash — and the value
+    // must still be refused rather than coerced.
+    nlohmann::json j = nlohmann::json::object();
+    j["ll"] = nlohmann::json::array({ nlohmann::json::array({ "x" }) });
+
+    const UintNest out = recFromWire_UintNest(j, nullptr);
+    EXPECT_TRUE(out.ll.at(0).isEmpty());
+}
+
+TEST(NestedDecodeErrors, AGoodValueLeavesTheSinkUntouched)
+{
+    // The control. Without it every assertion above is satisfied by a sink that
+    // is filled unconditionally.
+    std::string why;
+    const Everything out = recFromWire_Everything(recToWire_Everything(makeEverything()), &why);
+    EXPECT_TRUE(why.empty()) << why;
+    EXPECT_EQ(out.uints.oo, makeEverything().uints.oo);
+    EXPECT_EQ(out.deep.mmm, makeEverything().deep.mmm);
+}

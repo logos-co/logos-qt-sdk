@@ -136,3 +136,23 @@ the emitted HEADERS did not move at all — the fix changes no public signature.
 `recFromWire_Point` exactly where they did, and the three shapes a record can
 appear in produce the same JSON they always did — the fix is about the SPELLING
 of the loop, not about what it encodes.
+
+Rebased again for the DECODE ERROR CHANNEL. Both goldens moved by the same
+hunks, and the emitted headers still did not move — the sink is an
+implementation detail of the .cpp, not a signature.
+
+| change | why |
+|---|---|
+| every container decode gains `logos::qt::tryRequireArray` / `tryRequireObject` in place of `if (!__s.is_array())` | a wrong-shaped response used to answer an empty container and say nothing. The check is the CODEC's own, so the sentence a Qt consumer reports is the one every std consumer of the same contract reports |
+| `recFromWire_Point` takes a `std::string*`, and every call site passes one | the sink itself. A rejected element used to leave an empty container with `err.ok()` TRUE — indistinguishable from a container the provider legitimately sent empty. The parameter is UNNAMED here because `Point` has no field that can reject; a record that does gets it named |
+| `echo_ints`, `translate` and `bounds` decode into a named `_out`, then `logosNoteDecodeFailure(...)` | the fold onto `logos::CallError`. It cannot be done before the decode — the rejection is only known once the decode has walked the value — and it is guarded on `err`, because the error channel is opt-in and a caller who passed nothing already gets the qWarning |
+| `<name>AsyncResult` captures `_target = m_moduleName.toStdString()` | the callback runs after the method returned, and the wrapper is a copyable handle that may not outlive the call |
+| the value-only `<name>Async` and the typed event accessor declare `std::string* __derr = nullptr` | neither has anywhere to put an error, so the qWarning stays their only report. The sink still has to be NAMED, because the decode expression names it |
+
+**Byte-identical: every method the element rule does not reach.**
+`echo_strings` (`[tstr]` → QStringList), `attributes` (`{tstr: any}`),
+`describe` (`any`), `fetch` (`result`), `reset` (`void`) and every scalar return
+cross whole through the lenient `logos::qt::fromWire<T>`. That leniency is the
+shipped scalar contract and is deliberately untouched — this is the ELEMENT
+rule, and only the element rule. (As an ELEMENT, `[tstr]` *is* checked:
+`[[tstr]]` decodes each QStringList through `tryFromWire`.)

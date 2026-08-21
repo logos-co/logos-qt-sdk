@@ -333,11 +333,12 @@ target_link_libraries(qtgen_roundtrip_tests PRIVATE
 )
 gtest_discover_tests(qtgen_roundtrip_tests)
 
-# --- 7. the nested shapes, as TEXT ------------------------------------------
+# --- 7. the nested shapes, and the decode ERROR CHANNEL, as TEXT -------------
 #
-# The compile target above is the real assertion. This names the individual
-# properties, so a regression fails with its own sentence rather than as a
-# compile error 400 columns wide.
+# The compile target above is the real assertion for D2 and the runtime tests
+# are the real assertion for the error channel. These name the individual
+# properties, so a regression fails with its own sentence instead of as a
+# compile error 400 columns wide or a golden diff.
 #
 # The FORBID list is the more important half, and each entry was MEASURED: the
 # generator at the commit before this one emits every one of them for this exact
@@ -354,16 +355,40 @@ gtest_discover_tests(qtgen_roundtrip_tests)
 #                                    passed as a lambda argument — the ROOT of
 #                                    all three, and the one that catches the
 #                                    mistake before it picks a spelling
+#   if (!__s.is_array()         (23) the shape check that answered an empty
+#   if (!__s.is_object()        (22) container and told no one
 #
 # The REQUIRE entries beside them are the positive: after the fix there is
 # exactly ONE spelling of each loop, and its source is always the parameter.
 _qtgen_test(nested_shapes_emit generate consumer nested_module.lidl
             REQUIRE_TEXT "for (auto __i = __c.cbegin()"
                          "for (const auto& __e : __c)"
+                         "logos::qt::tryRequireArray(__s, &__why)"
+                         "logos::qt::tryRequireObject(__s, &__why)"
+                         "logos::qt::noteDecodeError(__derr,"
+                         "recFromWire_Point(const nlohmann::json& w, std::string*)"
             FORBID_TEXT "for (auto __i = __i"
                         "for (auto __i = *"
                         "for (const auto& __e : __e)"
-                        "const nlohmann::json& __src")
+                        "const nlohmann::json& __src"
+                        "if (!__s.is_array()"
+                        "if (!__s.is_object()")
+
+# The METHOD-level half of the error channel, which no test can execute: a
+# generated body calls the bridge, and there is no bridge here. So it is pinned
+# as text — the decode into a NAMED local (it cannot be folded before the decode
+# has walked the value), the fold on the sync surface, and the fold on the
+# result-carrying async surface with the target name CAPTURED rather than read
+# off `this` after the call returned.
+#
+# `std::string* __derr = nullptr` is the third surface: the value-only async
+# callback and event delivery have nowhere to put an error, so they pass a null
+# sink and the qWarning stays their only report.
+_qtgen_test(decode_failure_reaches_the_caller generate consumer nested_module.lidl
+            REQUIRE_TEXT "if (err) logosNoteDecodeFailure(_derr, m_moduleName.toStdString(), *err)"
+                         "[callback, _target = m_moduleName.toStdString()]"
+                         "logosNoteDecodeFailure(_derr, _target, _res.error)"
+                         "std::string* __derr = nullptr")
 
 # --- 4. --backend ui: the view plugin's host-facing surface -------------------
 #
