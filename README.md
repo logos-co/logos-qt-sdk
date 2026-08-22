@@ -34,9 +34,15 @@ macros), and the legacy `QObject`/`Q_INVOKABLE` provider glue
 > re-exported `logos_api.h` & co. from this prefix are gone; the only copy of
 > those headers in any closure is logos-qt-host's.
 >
-> What this repo still OWNS is `logos_ui_plugin_context.h`,
-> `logos_qt_lp_bridge.h`, `logos_qt_wire.h`, `logos_qt_host_core.h` and the
-> `logos-qt-generator` binary.
+> What this repo still OWNS is `logos_qt_lp_bridge.h`, `logos_qt_wire.h`,
+> `logos_qt_host_core.h` and the `logos-qt-generator` binary.
+>
+> `logos_ui_plugin_context.h` is still installed here, but logos-view-module
+> now ships it too and is its owner: it is one half of a matched pair with the
+> view glue emitter, which lives there. logos-module-builder puts
+> logos-view-module's copy on the include path AHEAD of this one. The copy here
+> is a leftover to be removed once every ui build is confirmed to reach the
+> header through logos-module-builder.
 
 Layered over [`logos-protocol`](https://github.com/logos-co/logos-protocol)
 (transports, token exchange, consumer core, the `lp_*` C ABI). Qt-plugin and
@@ -47,16 +53,25 @@ implementations depend only on the Qt-free
 ## logos-qt-generator
 
 This repo also hosts **`logos-qt-generator`** (`qt-generator/`,
-`packages.<system>.logos-qt-generator`) — the CONSUMER-side Qt glue and the ui
-plugin backend, per the Qt-confinement invariant (generated Qt code is the Qt
-layer's product; `logos-cpp-generator` keeps the Qt-free outputs). The
-PROVIDER-side Qt glue is not here: hosting a module in Qt is logos-plugin-qt's
-`logos-qt-host-generator`.
+`packages.<system>.logos-qt-generator`) — the CONSUMER-side Qt glue, per the
+Qt-confinement invariant (generated Qt code is the Qt layer's product;
+`logos-cpp-generator` keeps the Qt-free outputs). The PROVIDER-side Qt glue is
+not here: hosting a module in Qt is logos-plugin-qt's `logos-qt-host-generator`.
 
 | Mode | Input | Emits |
 |------|-------|-------|
 | `--backend consumer` | `--lidl` contract (or `--from-header`) | the Qt-typed CONSUMER wrapper for a dependency / interface: `<name>_api.{h,cpp}` |
-| `--backend ui` | `--metadata` + `--rep` | UI plugin glue: `<name>_ui_interface.h` (the `*Interface` + IID) + `<name>_ui_glue.{h,cpp}` (the `*Plugin`) around the user-written `.rep` + `*Backend` class |
+
+`--backend ui` was **removed**. The view plugin glue is emitted by
+[`logos-view-module`](https://github.com/logos-co/logos-view-module)'s
+`logos-view-generator`, which sits with the `LogosView*.in` templates its output
+is compiled against and with `logos_ui_plugin_context.h`, which its output calls
+into. Those three are one authoring surface, and splitting them is not
+theoretical tidiness: while the emitter lived here as well, the two copies drifted
+— this one gained the module teardown hook and the other did not — and nothing
+caught it, because a view plugin missing that hook builds, loads and runs. It is
+simply never asked to finish. Invoking `--backend ui` now fails with a message
+naming the replacement.
 
 There is deliberately **no backend that wraps a module implementation directly in
 a Qt provider object**. A module is a plain shared library; turning one into a Qt

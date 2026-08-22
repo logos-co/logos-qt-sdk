@@ -436,29 +436,24 @@ _qtgen_test(decode_failure_reaches_the_caller generate consumer nested_module.li
                          "logosNoteDecodeFailure(_derr, _target, _res.error)"
                          "std::string* __derr = nullptr")
 
-# --- 4. --backend ui: the view plugin's host-facing surface -------------------
+# --- 4. --backend ui: RETIRED, and refused loudly ----------------------------
 #
-# This backend had NO test at all, which is how it came to be the one generated
-# plugin class that did not publish the teardown hook. ui-host reaches
-# aboutToUnload() BY NAME through the meta-object; a plugin class that does not
-# declare it has no such meta-method, invokeMethod returns false, and the host
-# moves on silently. So dropping this emission again would not fail a build, or
-# a load, or a call -- every view would simply, and permanently, lose its chance
-# to finish. Nothing else in this repo would notice.
-set(_ui_fixtures ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/ui)
-
-add_test(NAME qtgen.ui_plugin_surface COMMAND ${CMAKE_COMMAND}
-    -DGENERATOR=${LOGOS_QT_GENERATOR}
-    -DMETADATA=${_ui_fixtures}/metadata.json
-    -DREP=${_ui_fixtures}/Ticker.rep
-    -DOUT_DIR=${_work}/ui_plugin_surface
-    # The three properties the host depends on, each named so it fails with its
-    # own sentence:
-    #   * the hook is INVOKABLE and returns int -- the host reads it back with
-    #     Q_RETURN_ARG(int) and must not need the SDK enum to resolve it;
-    #   * the completion signal exists -- a view that answers Asynchronous with
-    #     no way to say it is done gets refused the wait outright;
-    #   * the emission is QUEUED -- the backend may finish on any thread, and the
-    #     host is waiting on the plugin's.
-    "-DREQUIRE_TEXT=Q_INVOKABLE int aboutToUnload();|void unloadFinished();|Q_SIGNALS:|maybeUiPluginAboutToUnload|Qt::QueuedConnection"
-    -P ${CMAKE_CURRENT_SOURCE_DIR}/run_ui_generator.cmake)
+# The ui emitter lives in logos-view-module now (logos-view-generator), beside
+# the LogosView*.in templates its output is compiled against and beside
+# logos_ui_plugin_context.h, which its output calls into.
+#
+# What this pins is the REFUSAL, and it is worth a test because the alternative
+# to refusing is what caused the problem in the first place. This repo and
+# logos-view-module both carried the emitter; this copy gained the module
+# teardown hook and the other did not, and nothing noticed -- a generated view
+# plugin missing the hook builds, loads and runs, it just silently never gets
+# asked to finish. So `--backend ui` must not quietly become "unknown backend"
+# either: the message has to NAME the binary that took the work over, or the
+# next caller to land here (a logos-module-builder predating the repoint) gets
+# a generic parse error instead of the one sentence that resolves it.
+add_test(NAME qtgen.ui_backend_retired COMMAND ${CMAKE_COMMAND}
+    -DCMD=${LOGOS_QT_GENERATOR}
+    "-DARGS=--backend;ui;--metadata;x.json;--rep;x.rep"
+    -DEXPECT_FAIL=1
+    "-DREQUIRE_STDERR=--backend ui was removed|logos-view-generator"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/run_expect_refusal.cmake)
