@@ -1,5 +1,0 @@
-class TickerBackend
-{
-    SLOT(void refresh());
-    PROP(QString symbol READWRITE);
-};

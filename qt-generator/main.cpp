@@ -1,8 +1,8 @@
 // logos-qt-generator — ALL Qt glue emission for Logos modules.
 //
 // The Qt-confinement invariant puts generated Qt code in the Qt layer: this
-// tool (hosted by logos-qt-sdk) emits the Qt CONSUMER glue and the ui plugin
-// backend, while logos-cpp-sdk's logos-cpp-generator keeps the Qt-free
+// tool (hosted by logos-qt-sdk) emits the Qt CONSUMER glue, while
+// logos-cpp-sdk's logos-cpp-generator keeps the Qt-free
 // outputs (std typed wrappers, the logos_sdk umbrella, cdylib impl-exports,
 // LIDL derivation). Both tools share one LIDL frontend: the sources under
 // logos-cpp-sdk's share/lidl-frontend/, compiled into this binary.
@@ -25,7 +25,11 @@
 // module NOT language-neutral. `--backend cdylib` is retired too, for a
 // narrower reason: what it emitted was the HOSTING half — Qt glue over the C
 // ABI — and that half belongs with the host, so it lives in logos-plugin-qt's
-// qt-host-generator now. What remains here is the CONSUMER half plus ui. Modes:
+// qt-host-generator now. `--backend ui` is retired too: the view plugin glue
+// moved to logos-view-module's logos-view-generator, to sit with the
+// LogosView*.in templates its output compiles against and the
+// logos_ui_plugin_context.h its output calls into. What remains here is the
+// CONSUMER half. Modes:
 //   --backend consumer  the Qt-TYPED CONSUMER wrapper for a dependency /
 //                       interface: <name>_api.{h,cpp}. Same public surface the
 //                       legacy Qt wrapper had; the bodies convert at the edge
@@ -39,11 +43,6 @@
 //                       the LogosAPI-taking constructor, `origin` emits a
 //                       wrapper with NO LogosAPI that is handed the consuming
 //                       module's own name instead.
-//   --backend ui      UI plugin backend (type=ui_qml + interface=universal):
-//                       --metadata <m.json> --rep <view.rep>
-//                       [--backend-class C] [--backend-header h]
-//                       emits <name>_ui_interface.h + <name>_ui_glue.{h,cpp}
-//                       around the USER-written .rep + *Backend class
 
 #include <QCoreApplication>
 #include <QDir>
@@ -56,7 +55,6 @@
 
 #include "impl_header_parser.h"
 #include "lidl_emit_common.h"
-#include "lidl_gen_ui.h"
 #include "lidl_gen_qt_consumer.h"
 
 namespace {
@@ -102,51 +100,66 @@ int main(int argc, char* argv[])
     QString outputDir        = argValue(args, "--output-dir");
     QString implHeader       = argValue(args, "--impl-header");
 
-    // --backend ui: standalone mode — the user writes the .rep and the
-    // Backend class; only the Plugin/Interface pair is generated.
+    // Retired backends are refused BEFORE the input-shape usage gate below.
+    // Ordering is the whole point: a caller still passing `--backend ui` is
+    // passing --metadata/--rep and no --lidl, so the gate would fire first and
+    // answer with a generic parse error -- burying the one sentence that says
+    // where the work went under a usage string. Refuse by NAME, first.
     if (backend == "ui") {
-        const QString repPath = argValue(args, "--rep");
-        if (metadata.isEmpty() || repPath.isEmpty()) {
-            err << "Usage: logos-qt-generator --backend ui --metadata <metadata.json>\n"
-                   "         --rep <view.rep> [--backend-class <C>]\n"
-                   "         [--backend-header <include-name>] [--output-dir <dir>]\n";
-            return 1;
-        }
-        QFile mf(metadata);
-        if (!mf.open(QIODevice::ReadOnly)) {
-            err << "Failed to read metadata: " << metadata << "\n";
-            return 3;
-        }
-        const QJsonObject meta = QJsonDocument::fromJson(mf.readAll()).object();
-        UiGlueSpec spec;
-        spec.moduleName = meta.value(QStringLiteral("name")).toString();
-        spec.moduleVersion = meta.value(QStringLiteral("version")).toString(QStringLiteral("1.0.0"));
-        if (spec.moduleName.isEmpty()) {
-            err << "metadata.json has no name\n";
-            return 3;
-        }
-        spec.pluginBase = lidlToPascalCase(spec.moduleName);
-        QString repErr;
-        if (!lidlUiParseRepClass(repPath, &spec.repClass, &repErr)) {
-            err << "Error: " << repErr << "\n";
-            return 4;
-        }
-        spec.backendClass = argValue(args, "--backend-class");
-        if (spec.backendClass.isEmpty())
-            spec.backendClass = spec.pluginBase + QStringLiteral("Backend");
-        spec.backendHeader = argValue(args, "--backend-header");
-        if (spec.backendHeader.isEmpty())
-            spec.backendHeader = spec.moduleName + QStringLiteral("_backend.h");
-        if (outputDir.isEmpty())
-            outputDir = QDir::current().filePath("generated");
-        QDir().mkpath(outputDir);
-        QList<Out> outs;
-        outs.append({spec.moduleName + "_ui_interface.h", lidlMakeUiInterfaceHeader(spec)});
-        outs.append({spec.moduleName + "_ui_glue.h", lidlMakeUiGlueHeader(spec)});
-        outs.append({spec.moduleName + "_ui_glue.cpp", lidlMakeUiGlueSource(spec)});
-        const int rc = writeAll(outs, outputDir, out, err);
-        out.flush();
-        return rc;
+        // RETIRED, and refused loudly for the same reason `qt` and `cdylib`
+        // below are: the work moved to a different BINARY, so it cannot be
+        // defaulted or aliased.
+        //
+        // This one gets its own message because its failure mode was the
+        // nastiest of the three. The ui emitter existed HERE and in
+        // logos-view-module simultaneously, byte-identical at first, and then
+        // this copy gained the module teardown hook (logos-qt-sdk#38) while the
+        // other did not. Nothing detected the divergence, because a generated
+        // view plugin that omits the hook is not a broken build: ui-host
+        // reaches aboutToUnload() BY NAME through the meta-object, so a class
+        // that never declares it simply has no such meta-method,
+        // QMetaObject::invokeMethod returns false, and the host moves on --
+        // indistinguishable from a view answering "Synchronous, nothing to wait
+        // for". Every view would silently lose its chance to finish.
+        //
+        // The emitter now lives in logos-view-module ONLY, beside the
+        // LogosView*.in templates its output is compiled against and beside
+        // logos_ui_plugin_context.h, which its output calls into. Those three
+        // are one authoring surface; keeping the emitter here kept it pinned
+        // separately from the header it must agree with.
+        err << "Error: --backend ui was removed from logos-qt-generator; the "
+               "view plugin glue is emitted by logos-view-module now.\n"
+               "  Emit it with:  logos-view-generator --backend ui "
+               "--metadata <metadata.json> --rep <view.rep>\n"
+               "                 [--backend-class <C>] [--backend-header <h>] "
+               "[--output-dir <dir>]\n"
+               "logos-module-builder does this for `type: \"ui_qml\"` + "
+               "`interface: \"universal\"`. If a BUILD produced this, that "
+               "builder predates the repoint and is the thing to update.\n";
+        return 2;
+    }
+    if (backend == "qt" || backend == "cdylib") {
+        // Both RETIRED, and refused loudly rather than silently ignored. `qt`
+        // wrapped an impl class in a Qt provider, skipping the language-neutral
+        // seam outright. `cdylib` respected the seam but emitted the HOSTING
+        // half of it, which now lives with the host in logos-plugin-qt.
+        //
+        // Neither is a flag rename, so neither can be defaulted: the work moved
+        // to a different BINARY. A caller landing here is in practice a
+        // logos-module-builder predating the repoint of cdylib codegen onto
+        // logos-qt-host-generator — say so, because the symptom otherwise
+        // surfaces as a cmake error about missing generated sources, far from
+        // the pin that actually needs moving.
+        err << "Error: --backend " << backend << " was removed from "
+               "logos-qt-generator; this tool emits the CONSUMER glue, not the "
+               "Qt-plugin (provider) glue.\n"
+               "  Emit the C ABI:  logos-cpp-generator --lidl <c> --backend cdylib "
+               "--impl-class <C> --impl-header <h>\n"
+               "  Host it in Qt:   logos-qt-host-generator --lidl <c> --backend cdylib\n"
+               "logos-module-builder does both for `interface: \"universal\"` and "
+               "`interface: \"cdylib\"`. If a BUILD produced this, that builder "
+               "predates the repoint and is the thing to update.\n";
+        return 2;
     }
 
     const bool fromHeader = !headerPath.isEmpty();
@@ -154,7 +167,7 @@ int main(int argc, char* argv[])
         || (fromHeader && (implClass.isEmpty() || metadata.isEmpty()))) {
         err << "Usage: logos-qt-generator (--from-header <impl.h> --impl-class <C>\n"
                "         --metadata <metadata.json> | --lidl <contract.lidl>)\n"
-               "         --backend <ui|consumer>\n"
+               "         --backend consumer\n"
                "         [--impl-header <include-name>] [--output-dir <dir>]\n"
                "         [--bind static|bound] [--binding api|origin]\n";
         return 1;
@@ -252,30 +265,8 @@ int main(int argc, char* argv[])
         outs.append({depName + "_api.cpp",
                      lidlMakeQtConsumerSource(mod, depName, cls, headerRel, bindMode,
                                               bindingMode)});
-    } else if (backend == "qt" || backend == "cdylib") {
-        // Both RETIRED, and refused loudly rather than silently ignored. `qt`
-        // wrapped an impl class in a Qt provider, skipping the language-neutral
-        // seam outright. `cdylib` respected the seam but emitted the HOSTING
-        // half of it, which now lives with the host in logos-plugin-qt.
-        //
-        // Neither is a flag rename, so neither can be defaulted: the work moved
-        // to a different BINARY. A caller landing here is in practice a
-        // logos-module-builder predating the repoint of cdylib codegen onto
-        // logos-qt-host-generator — say so, because the symptom otherwise
-        // surfaces as a cmake error about missing generated sources, far from
-        // the pin that actually needs moving.
-        err << "Error: --backend " << backend << " was removed from "
-               "logos-qt-generator; this tool emits the CONSUMER glue and the ui "
-               "backend, not the Qt-plugin (provider) glue.\n"
-               "  Emit the C ABI:  logos-cpp-generator --lidl <c> --backend cdylib "
-               "--impl-class <C> --impl-header <h>\n"
-               "  Host it in Qt:   logos-qt-host-generator --lidl <c> --backend cdylib\n"
-               "logos-module-builder does both for `interface: \"universal\"` and "
-               "`interface: \"cdylib\"`. If a BUILD produced this, that builder "
-               "predates the repoint and is the thing to update.\n";
-        return 2;
     } else {
-        err << "Unknown --backend: " << backend << " (expected ui|consumer)\n";
+        err << "Unknown --backend: " << backend << " (expected consumer)\n";
         return 2;
     }
 
