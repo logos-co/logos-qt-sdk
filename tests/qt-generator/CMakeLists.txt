@@ -120,6 +120,38 @@ _qtgen_test(refuse_unknown_binding refuse consumer plain_module.lidl
             EXTRA_ARGS --binding orgin
             EXPECT_TEXT "Unknown --binding")
 
+# --- 3c. the provider-rejection detector matches a CLOSED SET of codes --------
+#
+# The emitted detector folds a provider REFUSAL into logos::CallError instead of
+# letting the return decode erase it into a default. It matched the single
+# literal "dispatch_failed" until providers were found to be emitting
+# "invalid_args" for an arity error with nobody detecting it — measured as
+# `logosctl call test_basic_module isPositive` (argument missing) exiting 0 with
+# status "ok" and the refusal object as its result.
+#
+# Named REQUIRE/FORBID rather than left to the golden: the golden says "this
+# exact text" and gets refreshed as a unit, and the property that matters here
+# is that all three codes are present and the OLD single-literal compare is
+# gone. `unknown_method` is asserted even though no provider emits it — that
+# readiness is the reason the detectors were widened before the providers.
+_qtgen_test(consumer_rejection_detector_matches_closed_code_set
+            generate consumer plain_module.lidl
+            REQUIRE_TEXT "_code != \"dispatch_failed\""
+                         "_code != \"invalid_args\""
+                         "_code != \"unknown_method\""
+            FORBID_TEXT "code->get<std::string>() != \"dispatch_failed\"")
+
+# The NEGATIVE half, stated as absences a golden refresh cannot quietly restore.
+# Widening one literal into a set is one edit away from an OPEN match on any
+# {code, message, origin} object, which would hand every method that legitimately
+# returns a three-string map to the error channel. The three shape guards are
+# what keep it closed, so require them by name.
+_qtgen_test(consumer_rejection_detector_stays_narrow
+            generate consumer plain_module.lidl
+            REQUIRE_TEXT "if (!v.is_object() || v.size() != 3) return false;"
+                         "if (!code->is_string() || !message->is_string() || !origin->is_string()) return false;"
+                         "if (code == v.end() || message == v.end() || origin == v.end()) return false;")
+
 # --- 4. two consumer wrappers COMPILE in one translation unit -----------------
 #
 # The tests above run the generator and read its text; none of them ever hands

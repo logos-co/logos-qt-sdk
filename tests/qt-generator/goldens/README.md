@@ -76,3 +76,32 @@ Both goldens grew by exactly the same 68 source lines and 6 header lines —
 the two methods with their three standard overloads each, appended — and
 nothing already there changed. Pure addition, zero deletions, which is what a
 contract gaining two methods should look like here.
+
+Refreshed once more for the widened provider-rejection detector. Both goldens
+changed by exactly the same 4-line hunk in `plain_module_api.cpp`, and nothing
+else moved — no header changed at all:
+
+```
+-    if (code->get<std::string>() != "dispatch_failed") return false;
+-    out.code = code->get<std::string>();
++    const std::string _code = code->get<std::string>();
++    if (_code != "dispatch_failed"
++        && _code != "invalid_args"
++        && _code != "unknown_method") return false;
++    out.code = _code;
+```
+
+The detector folds a provider REFUSAL into `logos::CallError` instead of letting
+the return decode erase it into a default. It matched one literal until
+providers were found to be emitting `invalid_args` for an arity error with
+nobody detecting it — measured as `logosctl call test_basic_module isPositive`
+(argument missing) exiting 0 with status `"ok"` and the refusal object as its
+result. `unknown_method` is in the set before any provider emits it, because a
+detector can be widened compatibly on its own while a new provider code cannot.
+
+The three shape guards above the compare are untouched, deliberately: the set is
+CLOSED, so an unrecognised code, a 2- or 4-key object and a non-string value all
+still come back as DATA. `CMakeLists.txt`'s
+`consumer_rejection_detector_matches_closed_code_set` and
+`consumer_rejection_detector_stays_narrow` state both halves as named
+properties, so a future golden refresh cannot quietly widen the match.

@@ -25,6 +25,43 @@
 
 namespace {
 
+// ── the provider rejection codes ────────────────────────────────────────────
+//
+// The CLOSED SET of `code` values that mark a result as a provider REFUSAL
+// rather than a value, and the single source of truth for the detector emitted
+// below. One named constant per repo is the compromise this file's own header
+// argues for: the detector body is DUPLICATED across generators on purpose
+// (see the comment at its emission site), so the least this repo can do is
+// hold the vocabulary in one place where a drift is visible.
+//
+// Why a closed set rather than "any {code,message,origin} object": a method may
+// legitimately RETURN a three-string map, and an `any` return certainly can.
+// Matching the shape alone would let user data impersonate a refusal.
+//
+//   "dispatch_failed" — the provider ran and refused the argument VALUES.
+//   "invalid_args"    — wrong argument COUNT. Emitted today by logos-cpp-sdk's
+//                       cdylib dispatch and logos-rust-sdk's args::invalid_args,
+//                       and until now detected by nobody: an arity error read
+//                       back as a successful call returning a map.
+//   "unknown_method"  — nothing emits this yet, deliberately listed anyway.
+//                       An unknown method is currently answered with a bare
+//                       null (logos-protocol logos_protocol.h), and fixing that
+//                       is a provider-contract change. Widening a detector is
+//                       backwards-compatible on its own; a new provider code
+//                       shipped against narrow detectors would arrive as DATA.
+const char* const kRejectionCodes[] = {
+    "dispatch_failed", "invalid_args", "unknown_method",
+};
+
+// `<var> != "a" && <var> != "b" && ...` over kRejectionCodes.
+QString rejectionCodeMismatch(const QString& var, const QString& joinIndent)
+{
+    QStringList terms;
+    for (const char* code : kRejectionCodes)
+        terms << var + " != \"" + QString::fromLatin1(code) + "\"";
+    return terms.join("\n" + joinIndent + "&& ");
+}
+
 // ── records ─────────────────────────────────────────────────────────────────
 
 bool isRecordName(const ModuleDecl& m, const std::string& n)
@@ -372,9 +409,11 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     // shared through a header) so both emitters stay independent, exactly as
     // the QVariant one already is.
     //
-    // The match is EXACT — those three fields, all strings, and that code —
-    // for the same reason logos_rpc_status.h's isUnauthorizedSentinel is
-    // exact: an `any` or map return carrying user data must never false-match.
+    // The match is NARROW — those three fields, all strings, and a code from
+    // the closed kRejectionCodes set above — for the same reason
+    // logos_rpc_status.h's isUnauthorizedSentinel is exact: an `any` or map
+    // return carrying user data must never false-match. Any other code, a
+    // 2- or 4-key object, or a non-string value all stay DATA.
     // Only reachable from a method body, so a contract with no methods must not
     // emit it: an unused function in an anonymous namespace is a
     // -Wunused-function warning.
@@ -403,8 +442,9 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "    auto code = v.find(\"code\"), message = v.find(\"message\"), origin = v.find(\"origin\");\n";
         s << "    if (code == v.end() || message == v.end() || origin == v.end()) return false;\n";
         s << "    if (!code->is_string() || !message->is_string() || !origin->is_string()) return false;\n";
-        s << "    if (code->get<std::string>() != \"dispatch_failed\") return false;\n";
-        s << "    out.code = code->get<std::string>();\n";
+        s << "    const std::string _code = code->get<std::string>();\n";
+        s << "    if (" << rejectionCodeMismatch("_code", "        ") << ") return false;\n";
+        s << "    out.code = _code;\n";
         s << "    out.message = message->get<std::string>();\n";
         s << "    out.origin = origin->get<std::string>();\n";
         s << "    return true;\n";

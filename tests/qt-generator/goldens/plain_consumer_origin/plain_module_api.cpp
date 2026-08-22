@@ -15,8 +15,11 @@ bool logosDispatchRejectionJson(const nlohmann::json& v, logos::CallError& out)
     auto code = v.find("code"), message = v.find("message"), origin = v.find("origin");
     if (code == v.end() || message == v.end() || origin == v.end()) return false;
     if (!code->is_string() || !message->is_string() || !origin->is_string()) return false;
-    if (code->get<std::string>() != "dispatch_failed") return false;
-    out.code = code->get<std::string>();
+    const std::string _code = code->get<std::string>();
+    if (_code != "dispatch_failed"
+        && _code != "invalid_args"
+        && _code != "unknown_method") return false;
+    out.code = _code;
     out.message = message->get<std::string>();
     out.origin = origin->get<std::string>();
     return true;
