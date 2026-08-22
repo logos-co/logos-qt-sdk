@@ -1,9 +1,11 @@
 ; The optionality fixture: every position a `?T` may legally appear.
 ;
-; NOTE what is absent — there is no `-> ?T` method, because an optional RETURN
-; is refused by design (see refuses_optional_return.lidl and
-; lidlCheckOptionalReturns). This contract is the positive case; that one is
-; the negative.
+;
+; It has no `-> ?T` method, and that is now only history: optional RETURNS were
+; refused by this backend when this fixture was written. They generate today
+; (see refuses_optional_return.lidl, which kept its name so the rule stays
+; findable). Left as it is so this contract keeps pinning what it always
+; pinned — the two FIELD spellings and the optional PARAMETER positions.
 module optional_module {
   version "1.0.0"
   description "Optional parameters, optional record fields, optional event args."

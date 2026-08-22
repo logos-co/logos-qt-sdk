@@ -1,12 +1,18 @@
-; TRIPWIRE FIXTURE. Generating from this MUST fail, on the consumer backend,
-; with a message naming the reason.
+; WAS a tripwire: generating from this used to FAIL, because an empty `?T` is
+; JSON null on the wire and null was also how a failed call reported itself, so
+; "found nothing" and "the call failed" were one answer.
 ;
-; It goes green — i.e. the generator starts accepting it — only when someone
-; teaches the host path to tell an empty optional apart from a failed call.
-; Read lidlCheckOptionalReturns before deleting this file: the fix is to NARROW
-; the null-means-failure rule to methods whose published metadata declares an
-; optional return, never to delete that rule (deleting it silently converts
-; every pre-existing failure into a success).
+; It now GENERATES, and the test beside it asserts the two properties that make
+; that safe rather than merely permitted:
+;
+;   * the surface keeps the value type — `std::optional<QString>`, not a bare
+;     QVariant, so the empty answer is distinct from ""; and
+;   * failure still travels on the ERROR channel, not in the value: a generated
+;     body decides nothing from the result's null-ness, and logos::LpClient
+;     decides success from the C ABI return code.
+;
+; The file keeps its name so the history of the rule stays findable from the
+; test that used to enforce it.
 module refusing_module {
   version "1.0.0"
   method lookup(id: tstr) -> ?tstr

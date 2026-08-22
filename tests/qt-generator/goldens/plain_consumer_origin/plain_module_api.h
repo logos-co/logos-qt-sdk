@@ -53,9 +53,9 @@ public:
     QStringList echo_strings(const QStringList& v, logos::CallError* err = nullptr, Timeout timeout = Timeout());
     void echo_stringsAsync(const QStringList& v, std::function<void(QStringList)> callback, Timeout timeout = Timeout());
     void echo_stringsAsyncResult(const QStringList& v, std::function<void(logos::AsyncResult<QStringList>)> callback, Timeout timeout = Timeout());
-    QVariantList echo_ints(const QVariantList& v, logos::CallError* err = nullptr, Timeout timeout = Timeout());
-    void echo_intsAsync(const QVariantList& v, std::function<void(QVariantList)> callback, Timeout timeout = Timeout());
-    void echo_intsAsyncResult(const QVariantList& v, std::function<void(logos::AsyncResult<QVariantList>)> callback, Timeout timeout = Timeout());
+    QList<qlonglong> echo_ints(const QList<qlonglong>& v, logos::CallError* err = nullptr, Timeout timeout = Timeout());
+    void echo_intsAsync(const QList<qlonglong>& v, std::function<void(QList<qlonglong>)> callback, Timeout timeout = Timeout());
+    void echo_intsAsyncResult(const QList<qlonglong>& v, std::function<void(logos::AsyncResult<QList<qlonglong>>)> callback, Timeout timeout = Timeout());
     Point translate(const Point& p, double dx, logos::CallError* err = nullptr, Timeout timeout = Timeout());
     void translateAsync(const Point& p, double dx, std::function<void(Point)> callback, Timeout timeout = Timeout());
     void translateAsyncResult(const Point& p, double dx, std::function<void(logos::AsyncResult<Point>)> callback, Timeout timeout = Timeout());

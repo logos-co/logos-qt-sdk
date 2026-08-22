@@ -246,14 +246,6 @@ int main(int argc, char* argv[])
             err << recErr << "\n";
             return 4;
         }
-        // A consumer that could CALL an optional-returning method would have no
-        // way to tell the empty answer from a failed call.
-        QString optErr;
-        if (!lidlCheckOptionalReturns(mod, &optErr)) {
-            err << optErr << "\n";
-            return 4;
-        }
-
         const QString headerRel = depName + "_api.h";
         outs.append({headerRel,
                      lidlMakeQtConsumerHeader(mod, depName, cls, bindMode, bindingMode)});

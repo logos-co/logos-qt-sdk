@@ -54,8 +54,8 @@ if(MODE STREQUAL "refuse")
   if(_rc EQUAL 0)
     message(FATAL_ERROR
       "expected the generator to REFUSE ${LIDL} on --backend ${BACKEND}, but it exited 0.\n"
-      "If optional returns are now representable end to end, read "
-      "lidlCheckOptionalReturns before changing this test.")
+      "A refusal test is a claim about what the generator will not emit; read the "
+      "check that is supposed to fire before deciding the test is wrong.")
   endif()
   string(FIND "${_err}" "${EXPECT_TEXT}" _pos)
   if(_pos EQUAL -1)

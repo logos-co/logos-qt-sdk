@@ -105,3 +105,89 @@ still come back as DATA. `CMakeLists.txt`'s
 `consumer_rejection_detector_matches_closed_code_set` and
 `consumer_rejection_detector_stays_narrow` state both halves as named
 properties, so a future golden refresh cannot quietly widen the match.
+
+Rebased again for the **lossless Qt type mapping** — the change that gave `[T]`,
+`{tstr: V}` and `?T` their element types on the Qt surface instead of
+QVariantList / QVariantMap / QVariant. Both goldens moved by the SAME hunks, and
+in this whole contract exactly ONE slot is affected:
+
+| change | why |
+|---|---|
+| `echo_ints`: `QVariantList` → `QList<qlonglong>` on all three overloads | `[int]` is a typed array, and the Qt surface now says so. It is the only widened shape in `plain_module.lidl` |
+| its argument encode becomes an element loop | `QVariant::fromValue(QList<qlonglong>)` is a value `qvariantToNlohmann` answers **null** for — it matches a closed `userType()` set. The loop hands it one ELEMENT at a time, each of which is in that set |
+| its return decode becomes an element loop through `logos::qt::tryFromWire` | the decode direction fails just as silently (`qvariant_cast<QList<qlonglong>>` of a QVariantList is EMPTY), and the per-element form is also what closes the no-element-type-checking gap: `["x", 5]` is now REJECTED with the codec's own sentence instead of arriving as `[0, 5]` |
+
+**Everything else in the contract is byte-identical, and that is the assertion
+worth reading.** `echo_strings` (`[tstr]` → QStringList), `attributes`
+(`{tstr: any}` → QVariantMap), `describe` (`any` → QVariant), `bounds`
+(`[Point]` → QList<Point>), `fetch` (`result`), `reset` (`void`) and every
+scalar did not move — QStringList is already in that closed set, and every
+`any`-bottomed shape deliberately keeps the QVariant spelling because QVariant
+is the only Qt type that holds bytes AND an exact uint64 AND arbitrary nesting.
+
+Rebased once more, for ONE emitter fix. Both goldens moved by the SAME hunk, and
+the emitted HEADERS did not move at all — the fix changes no public signature.
+
+| change | why |
+|---|---|
+| `bounds`: the `[Point]` argument encode takes its source as a lambda ARGUMENT (`}(points)`) instead of inlining it (`for (const auto& __e : points)`) | `QList<Record>` and `QMap<QString, Record>` had their own hand-written loops beside the generic ones, and those two INLINED their source. At depth that emitted code which does not compile — `{tstr: {tstr: Point}}` produced `for (auto __i = __i.value().cbegin(); …)`, `__i` in its own initialiser, and `?{tstr: Point}` produced `*x.cbegin()`, which parses as `*(x.cbegin())`. The special cases are gone; the generic loops already produce identical code for both, because they recurse onto the scalar record case |
+
+**Nothing else moved.** `translate` and `bounds` still call `recToWire_Point` /
+`recFromWire_Point` exactly where they did, and the three shapes a record can
+appear in produce the same JSON they always did — the fix is about the SPELLING
+of the loop, not about what it encodes.
+
+Rebased again for the DECODE ERROR CHANNEL. Both goldens moved by the same
+hunks, and the emitted headers still did not move — the sink is an
+implementation detail of the .cpp, not a signature.
+
+| change | why |
+|---|---|
+| every container decode gains `logos::qt::tryRequireArray` / `tryRequireObject` in place of `if (!__s.is_array())` | a wrong-shaped response used to answer an empty container and say nothing. The check is the CODEC's own, so the sentence a Qt consumer reports is the one every std consumer of the same contract reports |
+| `recFromWire_Point` takes a `std::string*`, and every call site passes one | the sink itself. A rejected element used to leave an empty container with `err.ok()` TRUE — indistinguishable from a container the provider legitimately sent empty. The parameter is UNNAMED here because `Point` has no field that can reject; a record that does gets it named |
+| `echo_ints`, `translate` and `bounds` decode into a named `_out`, then `logosNoteDecodeFailure(...)` | the fold onto `logos::CallError`. It cannot be done before the decode — the rejection is only known once the decode has walked the value — and it is guarded on `err`, because the error channel is opt-in and a caller who passed nothing already gets the qWarning |
+| `<name>AsyncResult` captures `_target = m_moduleName.toStdString()` | the callback runs after the method returned, and the wrapper is a copyable handle that may not outlive the call |
+| the value-only `<name>Async` and the typed event accessor declare `std::string* __derr = nullptr` | neither has anywhere to put an error, so the qWarning stays their only report. The sink still has to be NAMED, because the decode expression names it |
+
+**Byte-identical: every method the element rule does not reach.**
+`echo_strings` (`[tstr]` → QStringList), `attributes` (`{tstr: any}`),
+`describe` (`any`), `fetch` (`result`), `reset` (`void`) and every scalar return
+cross whole through the lenient `logos::qt::fromWire<T>`. That leniency is the
+shipped scalar contract and is deliberately untouched — this is the ELEMENT
+rule, and only the element rule. (As an ELEMENT, `[tstr]` *is* checked:
+`[[tstr]]` decodes each QStringList through `tryFromWire`.)
+
+Rebased once more, for the THREE SLOTS THE ELEMENT RULE DID NOT REACH. Both
+goldens moved by the same seven hunks, and the emitted **headers still did not
+move** — none of this changes a public signature.
+
+The previous entry above said, of the slots that cross the QVariant boundary
+whole: *"That leniency is the shipped scalar contract and is deliberately
+untouched."* Calling `[tstr]` and `{tstr: any}` **scalar** is what this entry
+corrects. They are CONTAINERS: they declare a shape, and `[tstr]` declares an
+element type too. The reason they had no element loop is an ENCODE property —
+QStringList / QVariantList / QVariantMap are in `qvariantToNlohmann`'s closed
+`userType()` set, so they cross whole — and it had been carried over into the
+DECODE direction, where it decides nothing. The tell that this was an accident
+rather than a contract: the very same types are already checked one level down,
+because as an ELEMENT `[tstr]` goes through `tryFromWire`. So `?[tstr]` was
+strict and `[tstr]` was not, for the same payload, in the same wrapper.
+
+| change | why |
+|---|---|
+| `echo_strings` (`[tstr]`) and `attributes` (`{tstr: any}`) decode through `logos::qt::tryFromWire` on all three overloads, and fold into the error channel exactly as `echo_ints` already did | `["a", 5, true, {}]` read as `[tstr]` arrived as four strings, three of which the provider never sent, while the std codec rejected the identical input. `{tstr: any}` declares no element type but does declare a SHAPE, and a wrong-shaped one answered an empty map and said nothing |
+| `recFromWire_Point` checks its SHAPE (`tryRequireObject`) instead of `if (!w.is_object()) return __out;` | a non-object answered a whole default-constructed struct with `err.ok()` — not an empty value the provider might really have sent, a record of fabricated members. `Codec<Record>::from`, the std twin, raises `typeError(path, "object", j)` for this input |
+| every scalar FIELD decodes through `tryFromWire` and reports a mismatch | inside ONE record a rejected `[uint]` field was reported while a mistyped `float64` field beside it was silently zeroed, from the same wire object, on the same channel. The granularity matches the element rule: the rejected slot keeps its default, the rest of the record still decodes, and `err.ok()` is no longer true |
+| `recFromWire_Point`'s sink parameter is now NAMED | every record's decode can reject, if only on its shape. The predicate that decided this per record (`recordDecodeUsesSink`) is gone with it |
+
+**Byte-identical: every bare SCALAR slot.** `echo_text`, `echo_bytes`,
+`echo_int`, `echo_uint`, `echo_bool`, `echo_float`, `describe` (`any`), `fetch`
+(`result`) and `reset` (`void`) still cross through the lenient
+`logos::qt::fromWire<T>`. That is the line, and it is deliberate: the leniency
+is the shipped contract of BOTH consumer surfaces — logos_qt_wire.h documents it
+here, and logos-cpp-sdk's lp emitter (`lpFromJsonExpr`) independently answers
+0 / "" / false for the same mismatch — so tightening it is a decision about
+every scalar return of every module, to be taken together with that emitter or
+the two surfaces diverge. `tests/qt-generator/roundtrip_tu.cpp` pins it with
+`ABareScalarSlotIsLenientOnPurpose`, so moving the line means deleting a test
+that says not to.
