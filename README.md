@@ -26,10 +26,10 @@ macros), and the legacy `QObject`/`Q_INVOKABLE` provider glue
 > capability targets. Those are exported too, and a consumer should link the
 > narrow one it actually is rather than the umbrella:
 > `logos-qt-sdk::logos_qt_consumer` (calling other modules — the Qt↔lp seam
-> headers, deliberately NO Qt host runtime), `::logos_qt_provider`
-> (implementing a view plugin — `logos_ui_plugin_context.h`),
-> `::logos_qt_host_core` (standing up a core — Qt marshalling over
-> `logos::host::LogosCore`) and `::logos_qt_common` under all three. The
+> headers, deliberately NO Qt host runtime), `::logos_qt_host_core` (standing up
+> a core — Qt marshalling over `logos::host::LogosCore`) and `::logos_qt_common`
+> under both. (`::logos_qt_provider` is gone with the header it existed for; see
+> below.) The
 > transitional forwarding headers that once
 > re-exported `logos_api.h` & co. from this prefix are gone; the only copy of
 > those headers in any closure is logos-qt-host's.
@@ -37,12 +37,13 @@ macros), and the legacy `QObject`/`Q_INVOKABLE` provider glue
 > What this repo still OWNS is `logos_qt_lp_bridge.h`, `logos_qt_wire.h`,
 > `logos_qt_host_core.h` and the `logos-qt-generator` binary.
 >
-> `logos_ui_plugin_context.h` is still installed here, but logos-view-module
-> now ships it too and is its owner: it is one half of a matched pair with the
-> view glue emitter, which lives there. logos-module-builder puts
-> logos-view-module's copy on the include path AHEAD of this one. The copy here
-> is a leftover to be removed once every ui build is confirmed to reach the
-> header through logos-module-builder.
+> `logos_ui_plugin_context.h` is no longer here. logos-view-module is its sole
+> owner: it is one half of a matched pair with the view glue emitter, which lives
+> there, and shipping a second copy from a separately-pinned repo is how a build
+> gets an emitter from one revision and a context header from another. Every ui
+> build reaches it through logos-module-builder, which passes
+> `LOGOS_VIEW_INCLUDE_DIR` on every plugin path — that was the condition this
+> copy was waiting on.
 
 Layered over [`logos-protocol`](https://github.com/logos-co/logos-protocol)
 (transports, token exchange, consumer core, the `lp_*` C ABI). Qt-plugin and
