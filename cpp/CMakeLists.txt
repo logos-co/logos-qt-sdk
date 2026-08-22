@@ -135,9 +135,8 @@ endif()
 # This is not cosmetic. The single `logos_qt_sdk` target below links
 # logos-qt-host PUBLIC, so before the split ANY consumer of a seam header also
 # linked the entire Qt host runtime. Measured: logos_qt_lp_bridge.h needs only
-# Qt Core + the lp ABI, logos_qt_wire.h adds logos-protocol's converters, and
-# logos_ui_plugin_context.h includes nothing but <type_traits>. None of the
-# three needs LogosAPI. A ui_qml module backend that wants the Qt-typed
+# Qt Core + the lp ABI, and logos_qt_wire.h adds logos-protocol's converters.
+# Neither needs LogosAPI. A ui_qml module backend that wants the Qt-typed
 # dependency wrapper should not inherit the host runtime to get it.
 
 add_library(logos_qt_common INTERFACE)
@@ -157,12 +156,12 @@ target_link_libraries(logos_qt_consumer INTERFACE
     ${LP_TARGET}
 )
 
-# IMPLEMENTING a view plugin: logos_ui_plugin_context.h, the ui_qml backend
-# seam. Header-only with no dependency beyond the include path.
-add_library(logos_qt_provider INTERFACE)
-target_link_libraries(logos_qt_provider INTERFACE
-    logos_qt_common
-)
+# There is no logos_qt_provider target any more. It existed for exactly one
+# header -- logos_ui_plugin_context.h, the ui_qml backend seam -- and that
+# header now ships only from logos-view-module, beside the view glue emitter it
+# is a matched pair with. With the header gone the target was an empty alias for
+# logos_qt_common with nothing in the tree linking it, so it is deleted rather
+# than left as a name that resolves to nothing in particular.
 
 # STANDING UP a core: Qt marshalling over logos::host::LogosCore. Named
 # logos_qt_host_core, NOT logos_qt_host — logos-qt-host::logos_qt_host is
@@ -185,7 +184,6 @@ add_library(logos_qt_sdk INTERFACE)
 
 target_link_libraries(logos_qt_sdk INTERFACE
     logos_qt_consumer
-    logos_qt_provider
     logos-qt-host::logos_qt_host
     ${LP_TARGET}
     Qt${QT_VERSION_MAJOR}::Core
@@ -208,13 +206,13 @@ target_include_directories(logos_qt_sdk INTERFACE
 # that lets a build silently pick the wrong copy. They are deleted, not
 # deprecated: the only logos_api.h in a closure is logos-qt-host's.
 #
-# What this package still installs is what it owns: logos_ui_plugin_context.h,
-# and (from the headers derivation, in the source-export layout) logos_qt_wire.h
-# and logos_qt_lp_bridge.h. Consumers that also need the host runtime get its
+# What this package still installs is what it owns: logos_qt_host_core.h, and
+# (from the headers derivation, in the source-export layout) logos_qt_wire.h and
+# logos_qt_lp_bridge.h. Consumers that also need the host runtime get its
 # include directory transitively, through the logos-qt-host::logos_qt_host that
 # the link interface above already names.
 
-install(TARGETS logos_qt_sdk logos_qt_common logos_qt_consumer logos_qt_provider logos_qt_host_core
+install(TARGETS logos_qt_sdk logos_qt_common logos_qt_consumer logos_qt_host_core
     EXPORT logos-qt-sdkTargets
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
@@ -265,7 +263,6 @@ install(FILES
 # halves are joined in flake.nix and their file sets stay disjoint apart from
 # this one deliberate mirror.
 install(FILES
-    logos_ui_plugin_context.h
     logos_qt_host_core.h
     DESTINATION include
 )
