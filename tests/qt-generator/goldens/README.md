@@ -156,3 +156,38 @@ cross whole through the lenient `logos::qt::fromWire<T>`. That leniency is the
 shipped scalar contract and is deliberately untouched — this is the ELEMENT
 rule, and only the element rule. (As an ELEMENT, `[tstr]` *is* checked:
 `[[tstr]]` decodes each QStringList through `tryFromWire`.)
+
+Rebased once more, for the THREE SLOTS THE ELEMENT RULE DID NOT REACH. Both
+goldens moved by the same seven hunks, and the emitted **headers still did not
+move** — none of this changes a public signature.
+
+The previous entry above said, of the slots that cross the QVariant boundary
+whole: *"That leniency is the shipped scalar contract and is deliberately
+untouched."* Calling `[tstr]` and `{tstr: any}` **scalar** is what this entry
+corrects. They are CONTAINERS: they declare a shape, and `[tstr]` declares an
+element type too. The reason they had no element loop is an ENCODE property —
+QStringList / QVariantList / QVariantMap are in `qvariantToNlohmann`'s closed
+`userType()` set, so they cross whole — and it had been carried over into the
+DECODE direction, where it decides nothing. The tell that this was an accident
+rather than a contract: the very same types are already checked one level down,
+because as an ELEMENT `[tstr]` goes through `tryFromWire`. So `?[tstr]` was
+strict and `[tstr]` was not, for the same payload, in the same wrapper.
+
+| change | why |
+|---|---|
+| `echo_strings` (`[tstr]`) and `attributes` (`{tstr: any}`) decode through `logos::qt::tryFromWire` on all three overloads, and fold into the error channel exactly as `echo_ints` already did | `["a", 5, true, {}]` read as `[tstr]` arrived as four strings, three of which the provider never sent, while the std codec rejected the identical input. `{tstr: any}` declares no element type but does declare a SHAPE, and a wrong-shaped one answered an empty map and said nothing |
+| `recFromWire_Point` checks its SHAPE (`tryRequireObject`) instead of `if (!w.is_object()) return __out;` | a non-object answered a whole default-constructed struct with `err.ok()` — not an empty value the provider might really have sent, a record of fabricated members. `Codec<Record>::from`, the std twin, raises `typeError(path, "object", j)` for this input |
+| every scalar FIELD decodes through `tryFromWire` and reports a mismatch | inside ONE record a rejected `[uint]` field was reported while a mistyped `float64` field beside it was silently zeroed, from the same wire object, on the same channel. The granularity matches the element rule: the rejected slot keeps its default, the rest of the record still decodes, and `err.ok()` is no longer true |
+| `recFromWire_Point`'s sink parameter is now NAMED | every record's decode can reject, if only on its shape. The predicate that decided this per record (`recordDecodeUsesSink`) is gone with it |
+
+**Byte-identical: every bare SCALAR slot.** `echo_text`, `echo_bytes`,
+`echo_int`, `echo_uint`, `echo_bool`, `echo_float`, `describe` (`any`), `fetch`
+(`result`) and `reset` (`void`) still cross through the lenient
+`logos::qt::fromWire<T>`. That is the line, and it is deliberate: the leniency
+is the shipped contract of BOTH consumer surfaces — logos_qt_wire.h documents it
+here, and logos-cpp-sdk's lp emitter (`lpFromJsonExpr`) independently answers
+0 / "" / false for the same mismatch — so tightening it is a decision about
+every scalar return of every module, to be taken together with that emitter or
+the two surfaces diverge. `tests/qt-generator/roundtrip_tu.cpp` pins it with
+`ABareScalarSlotIsLenientOnPurpose`, so moving the line means deleting a test
+that says not to.

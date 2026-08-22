@@ -57,11 +57,12 @@ static nlohmann::json recToWire_Point(const PlainModule::Point& v) {
     return __j;
 }
 
-static PlainModule::Point recFromWire_Point(const nlohmann::json& w, std::string*) {
+static PlainModule::Point recFromWire_Point(const nlohmann::json& w, std::string* __derr) {
     PlainModule::Point __out;
-    if (!w.is_object()) return __out;
-    if (w.contains("x")) __out.x = logos::qt::fromWire<double>(w.at("x"));
-    if (w.contains("y")) __out.y = logos::qt::fromWire<double>(w.at("y"));
+    std::string __why;
+    if (!logos::qt::tryRequireObject(w, &__why)) { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `Point` value: " + __why); qWarning() << "PlainModule: rejected a `Point` value:" << QString::fromStdString(__why); return __out; }
+    if (w.contains("x")) { double __v{}; if (logos::qt::tryFromWire(w.at("x"), __v, &__why)) __out.x = __v; else { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `float64` field `x`: " + __why); qWarning() << "PlainModule: rejected a `float64` field `x`:" << QString::fromStdString(__why); } }
+    if (w.contains("y")) { double __v{}; if (logos::qt::tryFromWire(w.at("y"), __v, &__why)) __out.y = __v; else { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `float64` field `y`: " + __why); qWarning() << "PlainModule: rejected a `float64` field `y`:" << QString::fromStdString(__why); } }
     return __out;
 }
 
@@ -333,7 +334,11 @@ QStringList PlainModule::echo_strings(const QStringList& v, logos::CallError* er
     if (_err.ok()) logosDispatchRejectionJson(_r, _err);
     if (err) *err = _err;
     else if (!_err.ok()) qWarning() << "PlainModule::echo_strings: remote call failed:" << QString::fromStdString(_err.message);
-    return logos::qt::fromWire<QStringList>(_r);
+    std::string _derr;
+    std::string* __derr = &_derr;
+    QStringList _out = [&](const nlohmann::json& __s){ QStringList __acc; std::string __why; if (!logos::qt::tryFromWire(__s, __acc, &__why)) { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `[tstr]` value: " + __why); qWarning() << "PlainModule: rejected a `[tstr]` value:" << QString::fromStdString(__why); return QStringList(); } return __acc; }(_r);
+    if (err) logosNoteDecodeFailure(_derr, m_moduleName.toStdString(), *err);
+    return _out;
 }
 
 void PlainModule::echo_stringsAsync(const QStringList& v, std::function<void(QStringList)> callback, Timeout timeout) {
@@ -344,7 +349,8 @@ void PlainModule::echo_stringsAsync(const QStringList& v, std::function<void(QSt
         [callback](nlohmann::json _r) {
             { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))
                   qWarning() << "PlainModule::echo_stringsAsync: remote call failed:" << QString::fromStdString(_rej.message); }
-            callback(logos::qt::fromWire<QStringList>(_r));
+            std::string* __derr = nullptr;
+            callback([&](const nlohmann::json& __s){ QStringList __acc; std::string __why; if (!logos::qt::tryFromWire(__s, __acc, &__why)) { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `[tstr]` value: " + __why); qWarning() << "PlainModule: rejected a `[tstr]` value:" << QString::fromStdString(__why); return QStringList(); } return __acc; }(_r));
         }, timeout.ms);
 }
 
@@ -353,11 +359,14 @@ void PlainModule::echo_stringsAsyncResult(const QStringList& v, std::function<vo
     nlohmann::json _args = nlohmann::json::array();
     _args.push_back(logos::qt::toWire(QVariant::fromValue(v)));
     logos::qt::invokeAsyncResult(m_bridge, "echo_strings", _args,
-        [callback](nlohmann::json _r, const logos::CallError& _err) {
+        [callback, _target = m_moduleName.toStdString()](nlohmann::json _r, const logos::CallError& _err) {
             logos::AsyncResult<QStringList> _res;
             _res.error = _err;
             if (_res.error.ok()) logosDispatchRejectionJson(_r, _res.error);
-            _res.value = logos::qt::fromWire<QStringList>(_r);
+            std::string _derr;
+            std::string* __derr = &_derr;
+            _res.value = [&](const nlohmann::json& __s){ QStringList __acc; std::string __why; if (!logos::qt::tryFromWire(__s, __acc, &__why)) { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `[tstr]` value: " + __why); qWarning() << "PlainModule: rejected a `[tstr]` value:" << QString::fromStdString(__why); return QStringList(); } return __acc; }(_r);
+            logosNoteDecodeFailure(_derr, _target, _res.error);
             callback(_res);
         }, timeout.ms);
 }
@@ -508,7 +517,11 @@ QVariantMap PlainModule::attributes(const QVariantMap& tags, logos::CallError* e
     if (_err.ok()) logosDispatchRejectionJson(_r, _err);
     if (err) *err = _err;
     else if (!_err.ok()) qWarning() << "PlainModule::attributes: remote call failed:" << QString::fromStdString(_err.message);
-    return logos::qt::fromWire<QVariantMap>(_r);
+    std::string _derr;
+    std::string* __derr = &_derr;
+    QVariantMap _out = [&](const nlohmann::json& __s){ QVariantMap __acc; std::string __why; if (!logos::qt::tryFromWire(__s, __acc, &__why)) { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `{tstr: any}` value: " + __why); qWarning() << "PlainModule: rejected a `{tstr: any}` value:" << QString::fromStdString(__why); return QVariantMap(); } return __acc; }(_r);
+    if (err) logosNoteDecodeFailure(_derr, m_moduleName.toStdString(), *err);
+    return _out;
 }
 
 void PlainModule::attributesAsync(const QVariantMap& tags, std::function<void(QVariantMap)> callback, Timeout timeout) {
@@ -519,7 +532,8 @@ void PlainModule::attributesAsync(const QVariantMap& tags, std::function<void(QV
         [callback](nlohmann::json _r) {
             { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))
                   qWarning() << "PlainModule::attributesAsync: remote call failed:" << QString::fromStdString(_rej.message); }
-            callback(logos::qt::fromWire<QVariantMap>(_r));
+            std::string* __derr = nullptr;
+            callback([&](const nlohmann::json& __s){ QVariantMap __acc; std::string __why; if (!logos::qt::tryFromWire(__s, __acc, &__why)) { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `{tstr: any}` value: " + __why); qWarning() << "PlainModule: rejected a `{tstr: any}` value:" << QString::fromStdString(__why); return QVariantMap(); } return __acc; }(_r));
         }, timeout.ms);
 }
 
@@ -528,11 +542,14 @@ void PlainModule::attributesAsyncResult(const QVariantMap& tags, std::function<v
     nlohmann::json _args = nlohmann::json::array();
     _args.push_back(logos::qt::toWire(QVariant::fromValue(tags)));
     logos::qt::invokeAsyncResult(m_bridge, "attributes", _args,
-        [callback](nlohmann::json _r, const logos::CallError& _err) {
+        [callback, _target = m_moduleName.toStdString()](nlohmann::json _r, const logos::CallError& _err) {
             logos::AsyncResult<QVariantMap> _res;
             _res.error = _err;
             if (_res.error.ok()) logosDispatchRejectionJson(_r, _res.error);
-            _res.value = logos::qt::fromWire<QVariantMap>(_r);
+            std::string _derr;
+            std::string* __derr = &_derr;
+            _res.value = [&](const nlohmann::json& __s){ QVariantMap __acc; std::string __why; if (!logos::qt::tryFromWire(__s, __acc, &__why)) { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `{tstr: any}` value: " + __why); qWarning() << "PlainModule: rejected a `{tstr: any}` value:" << QString::fromStdString(__why); return QVariantMap(); } return __acc; }(_r);
+            logosNoteDecodeFailure(_derr, _target, _res.error);
             callback(_res);
         }, timeout.ms);
 }

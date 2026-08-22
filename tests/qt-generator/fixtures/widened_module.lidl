@@ -17,6 +17,13 @@ module widened_module {
   }
 
   type Bag {
+    ; BARE SCALARS. The slot kind whose lenient narrowing is the shipped
+    ; contract at a method RETURN — and which is checked here, inside a record,
+    ; because a struct with one fabricated member and no way to tell which is
+    ; the record shape of the silent-empty-with-ok. Both halves are pinned in
+    ; roundtrip_tu.cpp.
+    label: tstr
+    count: uint
     ; typed arrays
     uints: [uint]
     ints: [int]

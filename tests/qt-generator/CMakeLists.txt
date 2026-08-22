@@ -366,13 +366,59 @@ _qtgen_test(nested_shapes_emit generate consumer nested_module.lidl
                          "logos::qt::tryRequireArray(__s, &__why)"
                          "logos::qt::tryRequireObject(__s, &__why)"
                          "logos::qt::noteDecodeError(__derr,"
-                         "recFromWire_Point(const nlohmann::json& w, std::string*)"
+                         "recFromWire_Point(const nlohmann::json& w, std::string* __derr)"
             FORBID_TEXT "for (auto __i = __i"
                         "for (auto __i = *"
                         "for (const auto& __e : __e)"
                         "const nlohmann::json& __src"
                         "if (!__s.is_array()"
-                        "if (!__s.is_object()")
+                        "if (!__s.is_object()"
+                        "if (!w.is_object()")
+
+# --- 7b. the three slots the ELEMENT rule did not reach ----------------------
+#
+# The runtime assertions for these live in roundtrip_tu.cpp, on the record
+# codec. What no test can execute is the METHOD-RETURN slot — a generated body
+# calls the bridge and there is no bridge here — so the property is pinned as
+# text, on the fixture that has one of each: `echo_strings` returns `[tstr]`,
+# `attributes` returns `{tstr: any}`.
+#
+# Both are CONTAINERS whose Qt spelling crosses the QVariant boundary whole
+# (QStringList / QVariantMap are in qvariantToNlohmann's closed userType() set),
+# which is why they never got an element loop. That is an ENCODE property, and
+# using it to decide DECODE strictness left `["a", 5, true, {}]` arriving from a
+# `[tstr]` as four strings while the std codec rejected it — and left `[tstr]`
+# STRICTER as an element (`?[tstr]`, `[[tstr]]`) than as a slot.
+#
+# The FORBID entry is the measured one: at the commit before this, the emitter
+# produced `fromWire<QStringList>` for that return, and now produces none.
+_qtgen_test(whole_crossing_containers_are_checked generate consumer plain_module.lidl
+            REQUIRE_TEXT "logos::qt::tryFromWire(__s, __acc, &__why)"
+                         "rejected a `[tstr]` value"
+                         "rejected a `{tstr: any}` value"
+                         "recFromWire_Point(const nlohmann::json& w, std::string* __derr)"
+                         "logos::qt::tryRequireObject(w, &__why)"
+                         "rejected a `float64` field `x`"
+            FORBID_TEXT "fromWire<QStringList>"
+                        "fromWire<QVariantMap>"
+                        "if (!w.is_object()")
+
+# The other half of the same line, and the reason the test above is not simply
+# "everything is checked now": a bare SCALAR slot is still decoded by the
+# lenient `logos::qt::fromWire<T>`, on purpose.
+#
+# That leniency is the shipped contract of BOTH consumer surfaces — logos_qt_wire.h
+# documents it here, and logos-cpp-sdk's lp emitter (lpFromJsonExpr)
+# independently answers 0 / "" / false for the same mismatch — so tightening it
+# is a decision about every scalar return of every module, taken together with
+# that emitter or the two diverge. Asserted so that moving the line means
+# deleting a test that says not to, rather than noticing a golden moved.
+# roundtrip_tu.cpp's ABareScalarSlotIsLenientOnPurpose is the runtime twin.
+_qtgen_test(bare_scalar_slots_stay_lenient generate consumer plain_module.lidl
+            REQUIRE_TEXT "logos::qt::fromWire<QString>(_r)"
+                         "logos::qt::fromWire<qulonglong>(_r)"
+                         "logos::qt::fromWire<QVariant>(_r)"
+                         "logos::qt::fromWire<LogosResult>(_r)")
 
 # The METHOD-level half of the error channel, which no test can execute: a
 # generated body calls the bridge, and there is no bridge here. So it is pinned

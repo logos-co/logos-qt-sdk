@@ -314,14 +314,57 @@ QString rejectStmt(const QString& owner, const QString& lidl, const QString& wha
 QString decodeElementStmt(const ModuleDecl& m, const TypeExpr& te, const QString& qual,
                           const QString& src, const QString& dst, const QString& bail);
 
-// Does the decode of `te` mention the sink? True exactly when something inside
-// it can REJECT: a record (whose codec takes the sink) or a typed container
-// (whose loop writes to it). A scalar, or anything bottoming out at `any`, goes
-// through the lenient `fromWire<T>` and names nothing — so the sink must not be
-// declared for it either, or the declaration is an unused variable.
+// A CONTAINER whose Qt spelling crosses the QVariant boundary WHOLE, so it
+// gets no element loop: `[tstr]` (QStringList), `[any]` (QVariantList),
+// `{tstr: any}` (QVariantMap).
+//
+// It still declares a SHAPE, and `[tstr]` still declares an element type — so
+// its decode is checked, just in one call instead of a loop:
+// logos::qt::tryFromWire routes it through the codec
+// (`std::vector<std::string>` / a shape assertion), which is the same rule the
+// element decoder applies. `needsElementLoop` is about how a value crosses the
+// QVariant boundary — an ENCODE property, decided by qvariantToNlohmann's
+// closed userType() set — and using it to decide DECODE strictness is what
+// left these three slots lenient.
+//
+// The tell that this was an accident rather than a contract: these very types
+// are ALREADY checked one level down. `?[tstr]` and `[[tstr]]` decode their
+// `[tstr]` through tryFromWire, because there `[tstr]` is an ELEMENT and
+// isCheckedLeaf is true for it. Only the BARE slot was lenient, so one
+// contract got two answers for the same payload depending on whether anything
+// was wrapped around it.
+bool isWholeCrossingContainer(const ModuleDecl& m, const TypeExpr& te)
+{
+    if (needsElementLoop(m, te)) return false;
+    return te.kind == TypeExpr::Array || te.kind == TypeExpr::Map;
+}
+
+// Does the decode of `te` REJECT a value that does not match the contract,
+// rather than coercing it?
+//
+// True for everything STRUCTURAL — a record (its own codec, which checks its
+// shape and every field), a typed container or optional (its element loop),
+// and the whole-crossing containers above (one checked call).
+//
+// False for a bare SCALAR slot, and that is deliberate and unchanged: `-> tstr`
+// handed a number still answers "" rather than failing. That leniency is the
+// shipped contract of BOTH consumer surfaces — logos_qt_wire.h says so for this
+// one, and logos-cpp-sdk's lp emitter (lpFromJsonExpr) independently answers
+// 0 / "" / false for the same mismatch — so tightening it is a separate
+// decision about a much wider surface, not part of closing this one.
+// tests/qt-generator/roundtrip_tu.cpp pins the leniency deliberately, so that
+// it is a choice on the record rather than an omission.
+bool decodeIsChecked(const ModuleDecl& m, const TypeExpr& te)
+{
+    return needsElementLoop(m, te) || isWholeCrossingContainer(m, te);
+}
+
+// Does the decode of `te` mention the sink? Exactly when it can reject: the
+// two questions have one answer, and naming them separately is how they would
+// drift into a declared-but-unused (or used-but-undeclared) `__derr`.
 bool decodeUsesSink(const ModuleDecl& m, const TypeExpr& te)
 {
-    return needsElementLoop(m, te);
+    return decodeIsChecked(m, te);
 }
 
 QString fromWire(const ModuleDecl& m, const TypeExpr& te, const QString& json, const QString& qual)
@@ -375,6 +418,19 @@ QString fromWire(const ModuleDecl& m, const TypeExpr& te, const QString& json, c
                  + " return " + cpp + "(__v); }(" + json + ")";
         }
     }
+    // A whole-crossing container: no loop, but still a checked decode. Same
+    // reject-and-return-empty shape the loops use, so a wrong-shaped `[tstr]`
+    // and a wrong-shaped `[uint]` answer the caller the same way.
+    if (isWholeCrossingContainer(m, te)) {
+        const QString owner = ownerOf(qual);
+        const QString lidl = lidlTypeToLidlText(te);
+        return "[&](const nlohmann::json& __s){ " + cpp + " __acc; std::string __why; "
+               "if (!logos::qt::tryFromWire(__s, __acc, &__why)) { "
+             + rejectStmt(owner, lidl, "value", "return " + cpp + "();")
+             + " } return __acc; }(" + json + ")";
+    }
+
+    // A bare SCALAR. The lenient narrowing, deliberately — see decodeIsChecked.
     return "logos::qt::fromWire<" + cpp + ">(" + json + ")";
 }
 
@@ -406,15 +462,12 @@ TypeExpr effectiveFieldType(const FieldDecl& f)
     return fieldIsOptional(f) ? fieldOptionalType(f) : f.type;
 }
 
-// Does THIS record's decode name the sink? Only then is its parameter given a
-// name; a record of plain scalars leaves it unnamed, so the generated codec has
-// no unused parameter and needs no `(void)` line to say so.
-bool recordDecodeUsesSink(const ModuleDecl& m, const TypeDecl& t)
-{
-    for (const FieldDecl& f : t.fields)
-        if (decodeUsesSink(m, effectiveFieldType(f))) return true;
-    return false;
-}
+// GONE: `recordDecodeUsesSink`. It answered "does this record's decode name the
+// sink?", so that a record of plain scalars could leave the parameter unnamed
+// and avoid an unused-parameter warning. Every record's decode now names it —
+// the SHAPE check alone can reject — so the question has one answer and the
+// parameter is always named. A predicate that is constantly true is a place for
+// a future reader to wonder whether it might not be.
 
 bool isVoid(const TypeExpr& te)
 {
@@ -808,14 +861,43 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             s << "    return __j;\n";
             s << "}\n\n";
 
-            // A missing / mistyped field keeps its default rather than failing
-            // the whole call — the same leniency the scalar paths have.
+            // A record is a STRUCTURAL slot, and it is checked like one: its
+            // SHAPE, and every field that is PRESENT. Its std twin —
+            // logos_codec.h's `Codec<Record>::from`, which the cdylib
+            // dispatch, the Rust provider and the plain wire all run — does
+            // exactly that, and a Qt consumer of the same contract that
+            // answered a default-constructed struct instead was the record
+            // shape of the silent-empty-with-ok this layer exists to close:
+            // the caller gets a fully-formed record carrying values the
+            // provider never sent, with no way to tell which ones.
+            //
+            // THE GRANULARITY IS THE SLOT, not the record, and that is
+            // deliberate: a rejected FIELD keeps its default and records the
+            // rejection, exactly as a rejected ELEMENT leaves its container
+            // empty and records it. That rule is already here for container
+            // fields (roundtrip_tu.cpp's ElementCheckingReachesNestedContainers
+            // pins it); giving scalar fields a different one would put two
+            // answers in one function. A wrong SHAPE is not a slot at all —
+            // there are no fields to keep — so it returns the default record,
+            // which is also what Codec<Record>::from's typeError amounts to.
+            //
+            // WHAT STAYS LENIENT, deliberately: a MISSING key keeps the
+            // field's default and says nothing. Absence is a question about
+            // the MESSAGE — did the peer send this key — not about whether a
+            // value matches its declared type, and both record codecs in this
+            // stack (this one and logos-cpp-sdk's lp emitter) have always
+            // answered it that way. Turning it into a refusal is a
+            // wire-compatibility change far wider than this defect.
+            // roundtrip_tu.cpp pins it as a choice rather than an omission.
+            //
+            // The sink parameter is therefore always NAMED: every record's
+            // decode can reject now, if only on its shape.
             s << "static " << qual << qs(t.name) << " " << recFromWireFn(qs(t.name))
-              << "(const nlohmann::json& w, std::string*"
-              << (recordDecodeUsesSink(module, t) ? QString(" ") + kSink : QString())
-              << ") {\n";
+              << "(const nlohmann::json& w, std::string* " << kSink << ") {\n";
             s << "    " << qual << qs(t.name) << " __out;\n";
-            s << "    if (!w.is_object()) return __out;\n";
+            s << "    std::string __why;\n";
+            s << "    if (!logos::qt::tryRequireObject(w, &__why)) { "
+              << rejectStmt(ownerOf(qual), qs(t.name), "value", "return __out;") << " }\n";
             for (const FieldDecl& f : t.fields) {
                 const QString src = "w.at(\"" + qs(f.name) + "\")";
                 // An optional field decodes through the optional path: a JSON
@@ -824,11 +906,45 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
                 // absent key and a null key land on the same value — and the
                 // surrounding `contains` guard keeps a missing key at the
                 // default, which is that same empty state.
-                const QString expr = fieldIsOptional(f)
-                                         ? fromWire(module, fieldOptionalType(f), src, qual)
-                                         : fromWire(module, f.type, src, qual);
-                s << "    if (w.contains(\"" << qs(f.name) << "\")) __out." << qs(f.name)
-                  << " = " << expr << ";\n";
+                const TypeExpr ft = effectiveFieldType(f);
+                s << "    if (w.contains(\"" << qs(f.name) << "\")) ";
+                if (decodeIsChecked(module, ft)) {
+                    // A record, a container or an optional: its own decode
+                    // already checks and already writes to this same sink.
+                    s << "__out." << qs(f.name) << " = "
+                      << fromWire(module, ft, src, qual) << ";\n";
+                } else {
+                    // A bare SCALAR field. This is the half of the element fix
+                    // that was missing: inside ONE record a rejected `[uint]`
+                    // field was reported while a mistyped `uint` field beside
+                    // it was silently zeroed, from the same wire object, on the
+                    // same error channel.
+                    //
+                    // A slot-level scalar (a `-> tstr` RETURN) keeps the
+                    // lenient narrowing; a scalar FIELD does not, because it is
+                    // part of a structure the wrapper is reconstructing and the
+                    // caller cannot see which member was fabricated. See
+                    // decodeIsChecked for where that line is drawn.
+                    //
+                    // `__why` is the function-scope one the shape check
+                    // declared; every field reuses it, so no field shadows
+                    // another.
+                    // paramPosition=TRUE, i.e. exactly fieldSurfaceType's
+                    // spelling — `__v` is assigned straight into the member, so
+                    // the two must agree. They differ for one type: a bare
+                    // `result` FIELD is declared QVariant (the legacy param
+                    // table had no LogosResult entry, and this generator's
+                    // contract is that no call site moves), while
+                    // paramPosition=false would spell it LogosResult and not
+                    // compile. No fixture had such a field, which is why the
+                    // expression path this replaces never hit it either.
+                    const QString cpp = surfaceType(module, ft, qual, /*paramPosition=*/true);
+                    s << "{ " << cpp << " __v{}; if (logos::qt::tryFromWire(" << src
+                      << ", __v, &__why)) __out." << qs(f.name) << " = __v; else { "
+                      << rejectStmt(ownerOf(qual), lidlTypeToLidlText(ft),
+                                    "field `" + qs(f.name) + "`", QString())
+                      << "} }\n";
+                }
             }
             s << "    return __out;\n";
             s << "}\n\n";
