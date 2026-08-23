@@ -47,17 +47,17 @@ void logosNoteDecodeFailure(const std::string& why, const std::string& origin,
 
 #endif  // LOGOS_GENERATED_DECODE_FAILURE_JSON
 
-static nlohmann::json recToWire_Point(const PlainModule::Point& v);
-static PlainModule::Point recFromWire_Point(const nlohmann::json& w, std::string* __derr = nullptr);
+static nlohmann::json recToWire_PlainModule_Point(const PlainModule::Point& v);
+static PlainModule::Point recFromWire_PlainModule_Point(const nlohmann::json& w, std::string* __derr = nullptr);
 
-static nlohmann::json recToWire_Point(const PlainModule::Point& v) {
+static nlohmann::json recToWire_PlainModule_Point(const PlainModule::Point& v) {
     nlohmann::json __j = nlohmann::json::object();
     __j["x"] = logos::qt::toWire(QVariant::fromValue(v.x));
     __j["y"] = logos::qt::toWire(QVariant::fromValue(v.y));
     return __j;
 }
 
-static PlainModule::Point recFromWire_Point(const nlohmann::json& w, std::string* __derr) {
+static PlainModule::Point recFromWire_PlainModule_Point(const nlohmann::json& w, std::string* __derr) {
     PlainModule::Point __out;
     std::string __why;
     if (!logos::qt::tryRequireObject(w, &__why)) { logos::qt::noteDecodeError(__derr, "PlainModule: rejected a `Point` value: " + __why); qWarning() << "PlainModule: rejected a `Point` value:" << QString::fromStdString(__why); return __out; }
@@ -100,7 +100,7 @@ bool PlainModule::onMoved(std::function<void(const Point& from, const Point& to)
     return logos::qt::subscribe(m_bridge, "moved", [callback](nlohmann::json _a) {
         if (!_a.is_array() || _a.size() < 2) return;
         std::string* __derr = nullptr;
-        callback(recFromWire_Point(_a.at(0), __derr), recFromWire_Point(_a.at(1), __derr));
+        callback(recFromWire_PlainModule_Point(_a.at(0), __derr), recFromWire_PlainModule_Point(_a.at(1), __derr));
     });
 }
 
@@ -418,7 +418,7 @@ void PlainModule::echo_intsAsyncResult(const QList<qlonglong>& v, std::function<
 
 PlainModule::Point PlainModule::translate(const Point& p, double dx, logos::CallError* err, Timeout timeout) {
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back(recToWire_Point(p));
+    _args.push_back(recToWire_PlainModule_Point(p));
     _args.push_back(logos::qt::toWire(QVariant::fromValue(dx)));
     logos::CallError _err;
     nlohmann::json _r = logos::qt::invoke(m_bridge, "translate", _args, &_err, timeout.ms);
@@ -427,7 +427,7 @@ PlainModule::Point PlainModule::translate(const Point& p, double dx, logos::Call
     else if (!_err.ok()) qWarning() << "PlainModule::translate: remote call failed:" << QString::fromStdString(_err.message);
     std::string _derr;
     std::string* __derr = &_derr;
-    PlainModule::Point _out = recFromWire_Point(_r, __derr);
+    PlainModule::Point _out = recFromWire_PlainModule_Point(_r, __derr);
     if (err) logosNoteDecodeFailure(_derr, m_moduleName.toStdString(), *err);
     return _out;
 }
@@ -435,21 +435,21 @@ PlainModule::Point PlainModule::translate(const Point& p, double dx, logos::Call
 void PlainModule::translateAsync(const Point& p, double dx, std::function<void(Point)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back(recToWire_Point(p));
+    _args.push_back(recToWire_PlainModule_Point(p));
     _args.push_back(logos::qt::toWire(QVariant::fromValue(dx)));
     logos::qt::invokeAsync(m_bridge, "translate", _args,
         [callback](nlohmann::json _r) {
             { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))
                   qWarning() << "PlainModule::translateAsync: remote call failed:" << QString::fromStdString(_rej.message); }
             std::string* __derr = nullptr;
-            callback(recFromWire_Point(_r, __derr));
+            callback(recFromWire_PlainModule_Point(_r, __derr));
         }, timeout.ms);
 }
 
 void PlainModule::translateAsyncResult(const Point& p, double dx, std::function<void(logos::AsyncResult<Point>)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back(recToWire_Point(p));
+    _args.push_back(recToWire_PlainModule_Point(p));
     _args.push_back(logos::qt::toWire(QVariant::fromValue(dx)));
     logos::qt::invokeAsyncResult(m_bridge, "translate", _args,
         [callback, _target = m_moduleName.toStdString()](nlohmann::json _r, const logos::CallError& _err) {
@@ -458,7 +458,7 @@ void PlainModule::translateAsyncResult(const Point& p, double dx, std::function<
             if (_res.error.ok()) logosDispatchRejectionJson(_r, _res.error);
             std::string _derr;
             std::string* __derr = &_derr;
-            _res.value = recFromWire_Point(_r, __derr);
+            _res.value = recFromWire_PlainModule_Point(_r, __derr);
             logosNoteDecodeFailure(_derr, _target, _res.error);
             callback(_res);
         }, timeout.ms);
@@ -466,7 +466,7 @@ void PlainModule::translateAsyncResult(const Point& p, double dx, std::function<
 
 PlainModule::Point PlainModule::bounds(const QList<Point>& points, logos::CallError* err, Timeout timeout) {
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(recToWire_Point(__e)); return __acc; }(points));
+    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(recToWire_PlainModule_Point(__e)); return __acc; }(points));
     logos::CallError _err;
     nlohmann::json _r = logos::qt::invoke(m_bridge, "bounds", _args, &_err, timeout.ms);
     if (_err.ok()) logosDispatchRejectionJson(_r, _err);
@@ -474,7 +474,7 @@ PlainModule::Point PlainModule::bounds(const QList<Point>& points, logos::CallEr
     else if (!_err.ok()) qWarning() << "PlainModule::bounds: remote call failed:" << QString::fromStdString(_err.message);
     std::string _derr;
     std::string* __derr = &_derr;
-    PlainModule::Point _out = recFromWire_Point(_r, __derr);
+    PlainModule::Point _out = recFromWire_PlainModule_Point(_r, __derr);
     if (err) logosNoteDecodeFailure(_derr, m_moduleName.toStdString(), *err);
     return _out;
 }
@@ -482,20 +482,20 @@ PlainModule::Point PlainModule::bounds(const QList<Point>& points, logos::CallEr
 void PlainModule::boundsAsync(const QList<Point>& points, std::function<void(Point)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(recToWire_Point(__e)); return __acc; }(points));
+    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(recToWire_PlainModule_Point(__e)); return __acc; }(points));
     logos::qt::invokeAsync(m_bridge, "bounds", _args,
         [callback](nlohmann::json _r) {
             { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))
                   qWarning() << "PlainModule::boundsAsync: remote call failed:" << QString::fromStdString(_rej.message); }
             std::string* __derr = nullptr;
-            callback(recFromWire_Point(_r, __derr));
+            callback(recFromWire_PlainModule_Point(_r, __derr));
         }, timeout.ms);
 }
 
 void PlainModule::boundsAsyncResult(const QList<Point>& points, std::function<void(logos::AsyncResult<Point>)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(recToWire_Point(__e)); return __acc; }(points));
+    _args.push_back([&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); for (const auto& __e : __c) __acc.push_back(recToWire_PlainModule_Point(__e)); return __acc; }(points));
     logos::qt::invokeAsyncResult(m_bridge, "bounds", _args,
         [callback, _target = m_moduleName.toStdString()](nlohmann::json _r, const logos::CallError& _err) {
             logos::AsyncResult<Point> _res;
@@ -503,7 +503,7 @@ void PlainModule::boundsAsyncResult(const QList<Point>& points, std::function<vo
             if (_res.error.ok()) logosDispatchRejectionJson(_r, _res.error);
             std::string _derr;
             std::string* __derr = &_derr;
-            _res.value = recFromWire_Point(_r, __derr);
+            _res.value = recFromWire_PlainModule_Point(_r, __derr);
             logosNoteDecodeFailure(_derr, _target, _res.error);
             callback(_res);
         }, timeout.ms);
@@ -556,7 +556,7 @@ void PlainModule::attributesAsyncResult(const QVariantMap& tags, std::function<v
 
 QVariant PlainModule::describe(const Point& p, logos::CallError* err, Timeout timeout) {
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back(recToWire_Point(p));
+    _args.push_back(recToWire_PlainModule_Point(p));
     logos::CallError _err;
     nlohmann::json _r = logos::qt::invoke(m_bridge, "describe", _args, &_err, timeout.ms);
     if (_err.ok()) logosDispatchRejectionJson(_r, _err);
@@ -568,7 +568,7 @@ QVariant PlainModule::describe(const Point& p, logos::CallError* err, Timeout ti
 void PlainModule::describeAsync(const Point& p, std::function<void(QVariant)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back(recToWire_Point(p));
+    _args.push_back(recToWire_PlainModule_Point(p));
     logos::qt::invokeAsync(m_bridge, "describe", _args,
         [callback](nlohmann::json _r) {
             { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))
@@ -580,7 +580,7 @@ void PlainModule::describeAsync(const Point& p, std::function<void(QVariant)> ca
 void PlainModule::describeAsyncResult(const Point& p, std::function<void(logos::AsyncResult<QVariant>)> callback, Timeout timeout) {
     if (!callback) return;
     nlohmann::json _args = nlohmann::json::array();
-    _args.push_back(recToWire_Point(p));
+    _args.push_back(recToWire_PlainModule_Point(p));
     logos::qt::invokeAsyncResult(m_bridge, "describe", _args,
         [callback](nlohmann::json _r, const logos::CallError& _err) {
             logos::AsyncResult<QVariant> _res;

@@ -132,8 +132,8 @@ the emitted HEADERS did not move at all — the fix changes no public signature.
 |---|---|
 | `bounds`: the `[Point]` argument encode takes its source as a lambda ARGUMENT (`}(points)`) instead of inlining it (`for (const auto& __e : points)`) | `QList<Record>` and `QMap<QString, Record>` had their own hand-written loops beside the generic ones, and those two INLINED their source. At depth that emitted code which does not compile — `{tstr: {tstr: Point}}` produced `for (auto __i = __i.value().cbegin(); …)`, `__i` in its own initialiser, and `?{tstr: Point}` produced `*x.cbegin()`, which parses as `*(x.cbegin())`. The special cases are gone; the generic loops already produce identical code for both, because they recurse onto the scalar record case |
 
-**Nothing else moved.** `translate` and `bounds` still call `recToWire_Point` /
-`recFromWire_Point` exactly where they did, and the three shapes a record can
+**Nothing else moved.** `translate` and `bounds` still call `recToWire_PlainModule_Point` /
+`recFromWire_PlainModule_Point` exactly where they did, and the three shapes a record can
 appear in produce the same JSON they always did — the fix is about the SPELLING
 of the loop, not about what it encodes.
 
@@ -144,7 +144,7 @@ implementation detail of the .cpp, not a signature.
 | change | why |
 |---|---|
 | every container decode gains `logos::qt::tryRequireArray` / `tryRequireObject` in place of `if (!__s.is_array())` | a wrong-shaped response used to answer an empty container and say nothing. The check is the CODEC's own, so the sentence a Qt consumer reports is the one every std consumer of the same contract reports |
-| `recFromWire_Point` takes a `std::string*`, and every call site passes one | the sink itself. A rejected element used to leave an empty container with `err.ok()` TRUE — indistinguishable from a container the provider legitimately sent empty. The parameter is UNNAMED here because `Point` has no field that can reject; a record that does gets it named |
+| `recFromWire_PlainModule_Point` takes a `std::string*`, and every call site passes one | the sink itself. A rejected element used to leave an empty container with `err.ok()` TRUE — indistinguishable from a container the provider legitimately sent empty. The parameter is UNNAMED here because `Point` has no field that can reject; a record that does gets it named |
 | `echo_ints`, `translate` and `bounds` decode into a named `_out`, then `logosNoteDecodeFailure(...)` | the fold onto `logos::CallError`. It cannot be done before the decode — the rejection is only known once the decode has walked the value — and it is guarded on `err`, because the error channel is opt-in and a caller who passed nothing already gets the qWarning |
 | `<name>AsyncResult` captures `_target = m_moduleName.toStdString()` | the callback runs after the method returned, and the wrapper is a copyable handle that may not outlive the call |
 | the value-only `<name>Async` and the typed event accessor declare `std::string* __derr = nullptr` | neither has anywhere to put an error, so the qWarning stays their only report. The sink still has to be NAMED, because the decode expression names it |
@@ -176,9 +176,9 @@ strict and `[tstr]` was not, for the same payload, in the same wrapper.
 | change | why |
 |---|---|
 | `echo_strings` (`[tstr]`) and `attributes` (`{tstr: any}`) decode through `logos::qt::tryFromWire` on all three overloads, and fold into the error channel exactly as `echo_ints` already did | `["a", 5, true, {}]` read as `[tstr]` arrived as four strings, three of which the provider never sent, while the std codec rejected the identical input. `{tstr: any}` declares no element type but does declare a SHAPE, and a wrong-shaped one answered an empty map and said nothing |
-| `recFromWire_Point` checks its SHAPE (`tryRequireObject`) instead of `if (!w.is_object()) return __out;` | a non-object answered a whole default-constructed struct with `err.ok()` — not an empty value the provider might really have sent, a record of fabricated members. `Codec<Record>::from`, the std twin, raises `typeError(path, "object", j)` for this input |
+| `recFromWire_PlainModule_Point` checks its SHAPE (`tryRequireObject`) instead of `if (!w.is_object()) return __out;` | a non-object answered a whole default-constructed struct with `err.ok()` — not an empty value the provider might really have sent, a record of fabricated members. `Codec<Record>::from`, the std twin, raises `typeError(path, "object", j)` for this input |
 | every scalar FIELD decodes through `tryFromWire` and reports a mismatch | inside ONE record a rejected `[uint]` field was reported while a mistyped `float64` field beside it was silently zeroed, from the same wire object, on the same channel. The granularity matches the element rule: the rejected slot keeps its default, the rest of the record still decodes, and `err.ok()` is no longer true |
-| `recFromWire_Point`'s sink parameter is now NAMED | every record's decode can reject, if only on its shape. The predicate that decided this per record (`recordDecodeUsesSink`) is gone with it |
+| `recFromWire_PlainModule_Point`'s sink parameter is now NAMED | every record's decode can reject, if only on its shape. The predicate that decided this per record (`recordDecodeUsesSink`) is gone with it |
 
 **Byte-identical: every bare SCALAR slot.** `echo_text`, `echo_bytes`,
 `echo_int`, `echo_uint`, `echo_bool`, `echo_float`, `describe` (`any`), `fetch`
@@ -191,3 +191,18 @@ every scalar return of every module, to be taken together with that emitter or
 the two surfaces diverge. `tests/qt-generator/roundtrip_tu.cpp` pins it with
 `ABareScalarSlotIsLenientOnPurpose`, so moving the line means deleting a test
 that says not to.
+
+Rebased once more, for a NAME and nothing else. Both goldens moved by the same
+hunk, in the .cpp only; the emitted headers did not move, because these two
+functions are file-scope `static` and appear in no signature.
+
+| change | why |
+|---|---|
+| `recToWire_Point` / `recFromWire_Point` are now `recToWire_PlainModule_Point` / `recFromWire_PlainModule_Point` — qualified by the wrapper class | the umbrella (logos-cpp-sdk `generator_lib.cpp`) amalgamates every generated `<name>_api.cpp` into ONE translation unit by `#include`-ing them from `logos_sdk.cpp`. Two contracts in one module that each declare a record called `Blob` therefore emitted two `recFromWire_Blob` differing only in return type — *ambiguating new declaration*, and the module does not compile. That is not a hypothetical shape, it is what a PROXY is: a module that binds an interface and also declares that interface's providers as dependencies gets three wrappers for one contract, so any record at all collides three ways. It went unnoticed because the only Qt-consumer fixture with a record — this one — has a single contract in it |
+
+**This diff is provably rename-only.** The golden was refreshed by applying the
+two-name substitution to the committed file and re-running the check, not by
+copying the generator's output over it: the byte-comparison then passed, which
+is the assertion that nothing else moved. `ownerOf(qual)` was already in scope
+at every emission site (it names the wrapper in the decode diagnostics), so the
+qualification adds no plumbing and no state.
