@@ -94,8 +94,36 @@ bool isRecordType(const ModuleDecl& m, const TypeExpr& te)
     return te.kind == TypeExpr::Named && isRecordName(m, te.name);
 }
 
-QString recToWireFn(const QString& r)   { return "recToWire_" + r; }
-QString recFromWireFn(const QString& r) { return "recFromWire_" + r; }
+// QUALIFIED BY THE WRAPPER CLASS, and it has to be.
+//
+// These are file-scope `static` functions, and the umbrella
+// (logos-cpp-sdk generator_lib.cpp) amalgamates every generated `<name>_api.cpp`
+// into ONE translation unit by #including them from logos_sdk.cpp. Two
+// contracts in one module that declare a record of the same name therefore
+// emitted two `recFromWire_Blob` differing only in return type — "ambiguating
+// new declaration", and the module does not compile.
+//
+// That is not a hypothetical shape: it is what a PROXY is. A module that binds
+// an interface and also declares the two providers of that interface as
+// dependencies gets three wrappers for one contract, so any record at all
+// collides three ways. It went unnoticed because the only Qt-consumer fixture
+// with records had a single contract in it.
+//
+// `ownerOf(qual)` is the class name and is already in scope at every emission
+// site (it names the wrapper in the decode diagnostics), so the qualification
+// costs no new plumbing.
+QString recToWireFn(const QString& owner, const QString& r)
+{
+    return "recToWire_" + owner + "_" + r;
+}
+QString recFromWireFn(const QString& owner, const QString& r)
+{
+    return "recFromWire_" + owner + "_" + r;
+}
+
+// Declared early: `toWire` below needs the class name and is emitted before
+// the diagnostics helper that already derives it.
+QString ownerOf(const QString& qual);
 
 // ── surface types ───────────────────────────────────────────────────────────
 //
@@ -209,12 +237,14 @@ bool isCheckedLeaf(const ModuleDecl& m, const TypeExpr& te)
     return !needsElementLoop(m, te);
 }
 
-QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr)
+QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr,
+               const QString& qual)
 {
     // The one structural leaf: a record is a struct with a generated codec.
     // `[Foo]`, `{tstr: Foo}` and `?Foo` are NOT special-cased — the container
     // loops below recurse and land here.
-    if (isRecordType(m, te)) return recToWireFn(qs(te.name)) + "(" + expr + ")";
+    if (isRecordType(m, te))
+        return recToWireFn(ownerOf(qual), qs(te.name)) + "(" + expr + ")";
 
     // The typed containers and optionals. There is deliberately ONE loop per
     // container kind, and every record shape reaches it by recursion.
@@ -231,13 +261,13 @@ QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr)
         if (te.kind == TypeExpr::Array) {
             return "[&](const auto& __c){ nlohmann::json __acc = nlohmann::json::array(); "
                    "for (const auto& __e : __c) __acc.push_back("
-                 + toWire(m, te.elements[0], "__e") + "); return __acc; }(" + expr + ")";
+                 + toWire(m, te.elements[0], "__e", qual) + "); return __acc; }(" + expr + ")";
         }
         if (te.kind == TypeExpr::Map) {
             return "[&](const auto& __c){ nlohmann::json __acc = nlohmann::json::object(); "
                    "for (auto __i = __c.cbegin(); __i != __c.cend(); ++__i) "
                    "__acc[__i.key().toStdString()] = "
-                 + toWire(m, te.elements[1], "__i.value()") + "; return __acc; }(" + expr + ")";
+                 + toWire(m, te.elements[1], "__i.value()", qual) + "; return __acc; }(" + expr + ")";
         }
         if (te.kind == TypeExpr::Optional) {
             // EMPTY is JSON null, the wire's single empty inhabitant, which
@@ -245,7 +275,7 @@ QString toWire(const ModuleDecl& m, const TypeExpr& te, const QString& expr)
             // omits its key instead — see the field emission below; that is a
             // property of named slots, not of `?T`.
             return "[&](const auto& __c){ return __c.has_value() ? nlohmann::json("
-                 + toWire(m, optionalValueType(te), "*__c")
+                 + toWire(m, optionalValueType(te), "*__c", qual)
                  + ") : nlohmann::json(nullptr); }(" + expr + ")";
         }
     }
@@ -372,7 +402,7 @@ QString fromWire(const ModuleDecl& m, const TypeExpr& te, const QString& json, c
     // A record's own codec, which takes the sink so a rejection INSIDE a record
     // field reaches the same channel as one in a bare container.
     if (isRecordType(m, te))
-        return recFromWireFn(qs(te.name)) + "(" + json + ", " + kSink + ")";
+        return recFromWireFn(ownerOf(qual), qs(te.name)) + "(" + json + ", " + kSink + ")";
 
     const QString cpp = surfaceType(m, te, qual, /*paramPosition=*/false);
     // Same loops in reverse, and the same rule about the source: it is a lambda
@@ -817,18 +847,18 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     // each other (and themselves, through a list field) in any order.
     if (!module.types.empty()) {
         for (const TypeDecl& t : module.types) {
-            s << "static nlohmann::json " << recToWireFn(qs(t.name))
+            s << "static nlohmann::json " << recToWireFn(ownerOf(qual), qs(t.name))
               << "(const " << qual << qs(t.name) << "& v);\n";
             // The sink is DEFAULTED here and only here — one default per
             // function, and this declaration is what a hand-written caller
             // (the round-trip test) sees, so `recFromWire_Bag(j)` keeps
             // working while the generated call sites all pass it through.
-            s << "static " << qual << qs(t.name) << " " << recFromWireFn(qs(t.name))
+            s << "static " << qual << qs(t.name) << " " << recFromWireFn(ownerOf(qual), qs(t.name))
               << "(const nlohmann::json& w, std::string* " << kSink << " = nullptr);\n";
         }
         s << "\n";
         for (const TypeDecl& t : module.types) {
-            s << "static nlohmann::json " << recToWireFn(qs(t.name))
+            s << "static nlohmann::json " << recToWireFn(ownerOf(qual), qs(t.name))
               << "(const " << qual << qs(t.name) << "& v) {\n";
             s << "    nlohmann::json __j = nlohmann::json::object();\n";
             for (const FieldDecl& f : t.fields) {
@@ -848,14 +878,14 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
                     const TypeExpr ot = fieldOptionalType(f);
                     if (lidlQtNeedsElementLoop(ot)) {
                         s << "    if (" << fv << ".has_value()) __j[\"" << qs(f.name) << "\"] = "
-                          << toWire(module, fieldValueType(f), "*" + fv) << ";\n";
+                          << toWire(module, fieldValueType(f), "*" + fv, qual) << ";\n";
                     } else {
                         s << "    if (" << fv << ".isValid()) __j[\"" << qs(f.name) << "\"] = "
-                          << toWire(module, f.type, fv) << ";\n";
+                          << toWire(module, f.type, fv, qual) << ";\n";
                     }
                 } else {
                     s << "    __j[\"" << qs(f.name) << "\"] = "
-                      << toWire(module, f.type, fv) << ";\n";
+                      << toWire(module, f.type, fv, qual) << ";\n";
                 }
             }
             s << "    return __j;\n";
@@ -892,7 +922,7 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             //
             // The sink parameter is therefore always NAMED: every record's
             // decode can reject now, if only on its shape.
-            s << "static " << qual << qs(t.name) << " " << recFromWireFn(qs(t.name))
+            s << "static " << qual << qs(t.name) << " " << recFromWireFn(ownerOf(qual), qs(t.name))
               << "(const nlohmann::json& w, std::string* " << kSink << ") {\n";
             s << "    " << qual << qs(t.name) << " __out;\n";
             s << "    std::string __why;\n";
@@ -1057,7 +1087,7 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         auto emitArgs = [&]() {
             s << "    nlohmann::json _args = nlohmann::json::array();\n";
             for (const ParamDecl& p : mtd.params)
-                s << "    _args.push_back(" << toWire(module, p.type, qs(p.name)) << ");\n";
+                s << "    _args.push_back(" << toWire(module, p.type, qs(p.name), qual) << ");\n";
         };
 
         // Can decoding this method's ANSWER reject? Only then does the body
