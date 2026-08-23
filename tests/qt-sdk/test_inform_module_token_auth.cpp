@@ -144,7 +144,7 @@ TEST_F(InformModuleTokenAuthTest, TrustedChannelCanPlantToken)
     bool ok = proxy.informModuleToken("the-module-core-secret", "caller_mod", "issued-tok");
 
     EXPECT_TRUE(ok) << "the trusted core/capability_module channel must be able to plant tokens";
-    EXPECT_EQ(TokenManager::instance().getToken("caller_mod"), "issued-tok");
+    EXPECT_EQ(TokenManager::instance().inbound().token("caller_mod"), "issued-tok");
 
     // And the token it issued is now usable by that caller — the intended flow.
     QVariant r = proxy.callRemoteMethod("issued-tok", "privilegedMethod", {QVariant(7)});

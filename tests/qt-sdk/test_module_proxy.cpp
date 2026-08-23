@@ -203,8 +203,8 @@ TEST_F(ModuleProxyTest, InformModuleTokenDelegatesToProvider)
 
     bool result = proxy.informModuleToken("trusted-secret", "target_mod", "tok123");
     EXPECT_TRUE(result);
-    // Provider's informModuleToken saves via TokenManager
-    EXPECT_EQ(TokenManager::instance().getToken("target_mod"), "tok123");
+    // Provider's informModuleToken saves via TokenManager's INBOUND half
+    EXPECT_EQ(TokenManager::instance().inbound().token("target_mod"), "tok123");
 
     // Don't leak the seeded secret into sibling tests sharing the singleton.
     TokenManager::instance().clearAllTokens();
