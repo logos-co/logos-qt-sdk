@@ -156,12 +156,12 @@ TEST(NestedShapes, MapOfMapOfRecordRoundTrips)
     RecNest in;
     in.mm["outer"] = QMap<QString, Point>{ { QStringLiteral("inner"), kP1 } };
 
-    const nlohmann::json j = recToWire_RecNest(in);
+    const nlohmann::json j = recToWire_NestedModule_RecNest(in);
     ASSERT_TRUE(j.at("mm").is_object()) << j.at("mm").dump();
     ASSERT_TRUE(j.at("mm").at("outer").is_object());
     EXPECT_DOUBLE_EQ(j.at("mm").at("outer").at("inner").at("x").get<double>(), 1.5);
 
-    const RecNest out = recFromWire_RecNest(j);
+    const RecNest out = recFromWire_NestedModule_RecNest(j);
     ASSERT_TRUE(out.mm.contains(QStringLiteral("outer")));
     ASSERT_TRUE(out.mm.value(QStringLiteral("outer")).contains(QStringLiteral("inner")));
     EXPECT_DOUBLE_EQ(out.mm.value(QStringLiteral("outer")).value(QStringLiteral("inner")).y, -2.5);
@@ -172,16 +172,16 @@ TEST(NestedShapes, OptionalMapOfRecordRoundTrips)
     RecNest in;
     in.om = QMap<QString, Point>{ { QStringLiteral("k"), kP2 } };
 
-    const nlohmann::json j = recToWire_RecNest(in);
+    const nlohmann::json j = recToWire_NestedModule_RecNest(in);
     ASSERT_TRUE(j.at("om").is_object()) << j.at("om").dump();
     EXPECT_DOUBLE_EQ(j.at("om").at("k").at("y").get<double>(), 4.0);
 
-    const RecNest out = recFromWire_RecNest(j);
+    const RecNest out = recFromWire_NestedModule_RecNest(j);
     ASSERT_TRUE(out.om.has_value());
     EXPECT_DOUBLE_EQ(out.om->value(QStringLiteral("k")).x, 3.0);
 
     // And the EMPTY optional still omits its key and comes back empty.
-    const RecNest empty = recFromWire_RecNest(recToWire_RecNest(RecNest{}));
+    const RecNest empty = recFromWire_NestedModule_RecNest(recToWire_NestedModule_RecNest(RecNest{}));
     EXPECT_FALSE(empty.om.has_value());
 }
 
@@ -190,7 +190,7 @@ TEST(NestedShapes, OptionalMapOfRecordRoundTrips)
 TEST(NestedShapes, EveryTwoContainerPairSurvivesTheWireForACheckedLeaf)
 {
     const UintNest in = makeUintNest();
-    const UintNest out = recFromWire_UintNest(recToWire_UintNest(in));
+    const UintNest out = recFromWire_NestedModule_UintNest(recToWire_NestedModule_UintNest(in));
 
     EXPECT_EQ(out.ll, in.ll);
     EXPECT_EQ(out.lm, in.lm);
@@ -206,11 +206,11 @@ TEST(NestedShapes, EveryTwoContainerPairSurvivesTheWireForACheckedLeaf)
 TEST(NestedShapes, EveryTwoContainerPairSurvivesTheWireForARecord)
 {
     const RecNest in = makeRecNest();
-    EXPECT_RECORD_ROUNDTRIP(recToWire_RecNest, recFromWire_RecNest, in);
+    EXPECT_RECORD_ROUNDTRIP(recToWire_NestedModule_RecNest, recFromWire_NestedModule_RecNest, in);
 
     // And the wire shape of each pair, so the round trip above cannot be
     // satisfied by two containers that are both empty.
-    const nlohmann::json j = recToWire_RecNest(in);
+    const nlohmann::json j = recToWire_NestedModule_RecNest(in);
     EXPECT_TRUE(j.at("ll").at(0).is_array());
     EXPECT_TRUE(j.at("lm").at(0).is_object());
     EXPECT_TRUE(j.at("lo").at(0).is_object());
@@ -225,7 +225,7 @@ TEST(NestedShapes, EveryTwoContainerPairSurvivesTheWireForARecord)
 
     // Two values read back through the struct, so the decode is not merely
     // symmetric with the encode.
-    const RecNest out = recFromWire_RecNest(j);
+    const RecNest out = recFromWire_NestedModule_RecNest(j);
     ASSERT_EQ(out.ll.size(), 2);
     ASSERT_EQ(out.ll.at(0).size(), 2);
     EXPECT_DOUBLE_EQ(out.ll.at(0).at(1).y, 4.0);
@@ -236,7 +236,7 @@ TEST(NestedShapes, EveryTwoContainerPairSurvivesTheWireForARecord)
 TEST(NestedShapes, TheSpeciallySpelledLeavesSurviveAtDepth)
 {
     const LeafNest in = makeLeafNest();
-    const nlohmann::json j = recToWire_LeafNest(in);
+    const nlohmann::json j = recToWire_NestedModule_LeafNest(in);
 
     // QStringList crosses WHOLE, so the outer container loops and the inner
     // value arrives intact — still a JSON array of strings, not a null.
@@ -250,7 +250,7 @@ TEST(NestedShapes, TheSpeciallySpelledLeavesSurviveAtDepth)
     EXPECT_TRUE(j.at("bb_ol").at(0).contains("_bytes"));
     EXPECT_TRUE(j.at("bb_lo").at(0).contains("_bytes"));
 
-    const LeafNest out = recFromWire_LeafNest(j);
+    const LeafNest out = recFromWire_NestedModule_LeafNest(j);
     EXPECT_EQ(out.ss_ll, in.ss_ll);
     EXPECT_EQ(out.ss_ml, in.ss_ml);
     EXPECT_EQ(out.ss_ol, in.ss_ol);
@@ -270,18 +270,18 @@ TEST(NestedShapes, TheSpeciallySpelledLeavesSurviveAtDepth)
 TEST(NestedShapes, DepthThreeSurvivesTheWire)
 {
     const DeepNest in = makeDeepNest();
-    const nlohmann::json j = recToWire_DeepNest(in);
+    const nlohmann::json j = recToWire_NestedModule_DeepNest(in);
     ASSERT_TRUE(j.at("lll").at(0).at(0).is_array()) << j.at("lll").dump();
     ASSERT_TRUE(j.at("mmm").at("a").at("b").is_object());
 
-    const DeepNest out = recFromWire_DeepNest(j);
+    const DeepNest out = recFromWire_NestedModule_DeepNest(j);
     // The record-free shapes compare directly; the record-bearing ones go
     // through the re-encode, for the reason above the macro.
     EXPECT_EQ(out.lll, in.lll);
     EXPECT_EQ(out.mmm, in.mmm);
     EXPECT_EQ(out.lom, in.lom);
     EXPECT_EQ(out.lmo, in.lmo);
-    EXPECT_RECORD_ROUNDTRIP(recToWire_DeepNest, recFromWire_DeepNest, in);
+    EXPECT_RECORD_ROUNDTRIP(recToWire_NestedModule_DeepNest, recFromWire_NestedModule_DeepNest, in);
 
     ASSERT_TRUE(out.olm.has_value());
     EXPECT_DOUBLE_EQ(out.olm->at(0).value(QStringLiteral("p")).x, 1.5);
@@ -298,9 +298,9 @@ TEST(NestedShapes, DepthThreeSurvivesTheWire)
 TEST(NestedShapes, ARecordOfRecordsSurvivesThroughAContainer)
 {
     const Everything in = makeEverything();
-    EXPECT_RECORD_ROUNDTRIP(recToWire_Everything, recFromWire_Everything, in);
+    EXPECT_RECORD_ROUNDTRIP(recToWire_NestedModule_Everything, recFromWire_NestedModule_Everything, in);
 
-    const Everything out = recFromWire_Everything(recToWire_Everything(in));
+    const Everything out = recFromWire_NestedModule_Everything(recToWire_NestedModule_Everything(in));
     EXPECT_EQ(out.uints.mm, in.uints.mm);
     EXPECT_EQ(out.deep.lll, in.deep.lll);
     ASSERT_TRUE(out.recs.om.has_value());
@@ -326,7 +326,7 @@ TEST(NestedDecodeErrors, ABadElementAtDepthTwoIsReported)
     j["ll"] = nlohmann::json::array({ nlohmann::json::array({ 1, "x" }) });
 
     std::string why;
-    const UintNest out = recFromWire_UintNest(j, &why);
+    const UintNest out = recFromWire_NestedModule_UintNest(j, &why);
 
     ASSERT_EQ(out.ll.size(), 1);
     EXPECT_TRUE(out.ll.at(0).isEmpty()) << "the bad element must refuse the container";
@@ -342,7 +342,7 @@ TEST(NestedDecodeErrors, ABadElementAtDepthThreeIsReported)
         { nlohmann::json::array({ nlohmann::json::array({ 1, "x" }) }) });
 
     std::string why;
-    const DeepNest out = recFromWire_DeepNest(j, &why);
+    const DeepNest out = recFromWire_NestedModule_DeepNest(j, &why);
 
     ASSERT_EQ(out.lll.size(), 1);
     ASSERT_EQ(out.lll.at(0).size(), 1);
@@ -360,7 +360,7 @@ TEST(NestedDecodeErrors, AWrongShapedContainerIsReportedNotSilentlyEmpty)
         nlohmann::json j = nlohmann::json::object();
         j["ll"] = nlohmann::json::object();
         std::string why;
-        const UintNest out = recFromWire_UintNest(j, &why);
+        const UintNest out = recFromWire_NestedModule_UintNest(j, &why);
         EXPECT_TRUE(out.ll.isEmpty());
         EXPECT_NE(why.find("expected array"), std::string::npos) << why;
     }
@@ -368,7 +368,7 @@ TEST(NestedDecodeErrors, AWrongShapedContainerIsReportedNotSilentlyEmpty)
         nlohmann::json j = nlohmann::json::object();
         j["ml"] = nlohmann::json::array({ 1 });
         std::string why;
-        const UintNest out = recFromWire_UintNest(j, &why);
+        const UintNest out = recFromWire_NestedModule_UintNest(j, &why);
         EXPECT_TRUE(out.ml.isEmpty());
         EXPECT_NE(why.find("expected object"), std::string::npos) << why;
     }
@@ -377,7 +377,7 @@ TEST(NestedDecodeErrors, AWrongShapedContainerIsReportedNotSilentlyEmpty)
         nlohmann::json j = nlohmann::json::object();
         j["ll"] = nlohmann::json::array({ nlohmann::json::object() });
         std::string why;
-        recFromWire_UintNest(j, &why);
+        recFromWire_NestedModule_UintNest(j, &why);
         EXPECT_NE(why.find("expected array"), std::string::npos) << why;
     }
 }
@@ -389,7 +389,7 @@ TEST(NestedDecodeErrors, TheFirstRejectionWins)
     j["ml"] = nlohmann::json::object({ { "k", nlohmann::json::array({ "second" }) } });
 
     std::string why;
-    recFromWire_UintNest(j, &why);
+    recFromWire_NestedModule_UintNest(j, &why);
     ASSERT_FALSE(why.empty());
     // Both slots reject; the sink keeps the one that names the actual mismatch
     // a reader will chase, not the last one the walk happened to reach.
@@ -405,7 +405,7 @@ TEST(NestedDecodeErrors, ANullSinkIsTheSurfaceWithNoErrorChannel)
     nlohmann::json j = nlohmann::json::object();
     j["ll"] = nlohmann::json::array({ nlohmann::json::array({ "x" }) });
 
-    const UintNest out = recFromWire_UintNest(j, nullptr);
+    const UintNest out = recFromWire_NestedModule_UintNest(j, nullptr);
     EXPECT_TRUE(out.ll.at(0).isEmpty());
 }
 
@@ -414,7 +414,7 @@ TEST(NestedDecodeErrors, AGoodValueLeavesTheSinkUntouched)
     // The control. Without it every assertion above is satisfied by a sink that
     // is filled unconditionally.
     std::string why;
-    const Everything out = recFromWire_Everything(recToWire_Everything(makeEverything()), &why);
+    const Everything out = recFromWire_NestedModule_Everything(recToWire_NestedModule_Everything(makeEverything()), &why);
     EXPECT_TRUE(why.empty()) << why;
     EXPECT_EQ(out.uints.oo, makeEverything().uints.oo);
     EXPECT_EQ(out.deep.mmm, makeEverything().deep.mmm);

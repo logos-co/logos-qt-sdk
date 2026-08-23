@@ -12,7 +12,7 @@
 //
 // So this file `#include`s the generated .cpp — the same trick
 // fixtures/umbrella_tu.cpp uses, which is what makes the file-local record
-// codecs (`recToWire_Bag` / `recFromWire_Bag`) reachable — and pushes real
+// codecs (`recToWire_WidenedModule_Bag` / `recFromWire_WidenedModule_Bag`) reachable — and pushes real
 // values through them. Those two functions are built from EXACTLY the same
 // `toWire` / `fromWire` expressions the generator emits for a method argument
 // and a return value; there is one emitter and one table, so a value that
@@ -77,7 +77,7 @@ Bag makeBag()
 TEST(WidenedRoundTrip, EveryWidenedFieldSurvivesTheWire)
 {
     const Bag in = makeBag();
-    const Bag out = recFromWire_Bag(recToWire_Bag(in));
+    const Bag out = recFromWire_WidenedModule_Bag(recToWire_WidenedModule_Bag(in));
 
     EXPECT_EQ(out.label, in.label);
     EXPECT_EQ(out.count, in.count);
@@ -117,12 +117,12 @@ TEST(WidenedRoundTrip, UintKeepsItsTopBit)
     in.counts["k"] = 18446744073709551615ULL;
     in.maybe_uint = 18446744073709551615ULL;
 
-    const nlohmann::json j = recToWire_Bag(in);
+    const nlohmann::json j = recToWire_WidenedModule_Bag(in);
     // On the WIRE it must be an unsigned integer, not a double and not -1.
     ASSERT_TRUE(j.at("uints").at(0).is_number_unsigned());
     EXPECT_EQ(j.at("uints").at(0).get<uint64_t>(), 18446744073709551615ULL);
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
     EXPECT_EQ(out.uints.at(0), 18446744073709551615ULL);
     EXPECT_EQ(out.counts.value("k"), 18446744073709551615ULL);
     ASSERT_TRUE(out.maybe_uint.has_value());
@@ -139,13 +139,13 @@ TEST(WidenedRoundTrip, BytesStayTaggedInsideTypedContainers)
     in.chunks["k"] = QByteArray("\x00\xfe", 2);
     in.maybe_blob = QByteArray("\x00", 1);
 
-    const nlohmann::json j = recToWire_Bag(in);
+    const nlohmann::json j = recToWire_WidenedModule_Bag(in);
     ASSERT_TRUE(j.at("blobs").at(0).is_object());
     EXPECT_TRUE(j.at("blobs").at(0).contains("_bytes"));
     EXPECT_TRUE(j.at("chunks").at("k").contains("_bytes"));
     EXPECT_TRUE(j.at("maybe_blob").contains("_bytes"));
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
     EXPECT_EQ(out.blobs.at(0), in.blobs.at(0));
     EXPECT_EQ(out.blobs.at(0).size(), 5);
     EXPECT_EQ(out.chunks.value("k"), in.chunks.value("k"));
@@ -160,7 +160,7 @@ TEST(WidenedRoundTrip, BytesStayTaggedInsideTypedContainers)
 TEST(WidenedRoundTrip, TypedContainersEncodeAsArraysAndObjectsNotNull)
 {
     const Bag in = makeBag();
-    const nlohmann::json j = recToWire_Bag(in);
+    const nlohmann::json j = recToWire_WidenedModule_Bag(in);
 
     EXPECT_TRUE(j.at("uints").is_array())   << j.at("uints").dump();
     EXPECT_TRUE(j.at("ints").is_array());
@@ -190,13 +190,13 @@ TEST(WidenedRoundTrip, EmptyOptionalOmitsItsKeyAndComesBackEmpty)
     ASSERT_FALSE(in.maybe_text.has_value());
     ASSERT_FALSE(in.maybe_uint.has_value());
 
-    const nlohmann::json j = recToWire_Bag(in);
+    const nlohmann::json j = recToWire_WidenedModule_Bag(in);
     EXPECT_FALSE(j.contains("maybe_text"));   // flag spelling
     EXPECT_FALSE(j.contains("maybe_uint"));   // type spelling
     EXPECT_FALSE(j.contains("maybe_blob"));
     EXPECT_FALSE(j.contains("maybe_point"));
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
     EXPECT_FALSE(out.maybe_text.has_value());
     EXPECT_FALSE(out.maybe_uint.has_value());
     EXPECT_FALSE(out.maybe_blob.has_value());
@@ -208,13 +208,13 @@ TEST(WidenedRoundTrip, EmptyOptionalOmitsItsKeyAndComesBackEmpty)
 // the key. Both must arrive as empty.
 TEST(WidenedRoundTrip, ExplicitNullDecodesToEmpty)
 {
-    nlohmann::json j = recToWire_Bag(makeBag());
+    nlohmann::json j = recToWire_WidenedModule_Bag(makeBag());
     j["maybe_text"] = nullptr;
     j["maybe_uint"] = nullptr;
     j["maybe_blob"] = nullptr;
     j["maybe_point"] = nullptr;
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
     EXPECT_FALSE(out.maybe_text.has_value());
     EXPECT_FALSE(out.maybe_uint.has_value());
     EXPECT_FALSE(out.maybe_blob.has_value());
@@ -228,11 +228,11 @@ TEST(WidenedRoundTrip, PresentEmptyStringIsNotAnEmptyOptional)
 {
     Bag in;
     in.maybe_text = QString();          // present, and empty
-    const nlohmann::json j = recToWire_Bag(in);
+    const nlohmann::json j = recToWire_WidenedModule_Bag(in);
     ASSERT_TRUE(j.contains("maybe_text"));
     EXPECT_TRUE(j.at("maybe_text").is_string());
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
     ASSERT_TRUE(out.maybe_text.has_value());
     EXPECT_TRUE(out.maybe_text->isEmpty());
 }
@@ -244,12 +244,12 @@ TEST(WidenedRoundTrip, OptionalElementsKeepTheirPositions)
     Bag in;
     in.holes = { std::nullopt, std::optional<QString>(QStringLiteral("mid")), std::nullopt };
 
-    const nlohmann::json j = recToWire_Bag(in);
+    const nlohmann::json j = recToWire_WidenedModule_Bag(in);
     ASSERT_EQ(j.at("holes").size(), 3u);
     EXPECT_TRUE(j.at("holes").at(0).is_null());
     EXPECT_EQ(j.at("holes").at(1).get<std::string>(), "mid");
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
     ASSERT_EQ(out.holes.size(), 3);
     EXPECT_FALSE(out.holes.at(0).has_value());
     ASSERT_TRUE(out.holes.at(1).has_value());
@@ -273,7 +273,7 @@ TEST(WidenedRoundTrip, AStringElementInAUintArrayIsRejectedNotZeroed)
     nlohmann::json j = nlohmann::json::object();
     j["uints"] = nlohmann::json::array({ "x", 5 });
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
     ASSERT_NE(out.uints, (QList<qulonglong>{ 0ULL, 5ULL }))
         << "a string element was silently coerced to 0 — the exact defect";
     EXPECT_TRUE(out.uints.isEmpty());
@@ -289,7 +289,7 @@ TEST(WidenedRoundTrip, AStringElementInAUintArrayIsRejectedNotZeroed)
 // contract THREW for that input; the two surfaces disagreed about whether a
 // mistyped element is an error at all.
 //
-// `recFromWire_Bag`'s second parameter is that channel — the same `std::string*`
+// `recFromWire_WidenedModule_Bag`'s second parameter is that channel — the same `std::string*`
 // the generated method bodies declare and fold into `logos::CallError` — so the
 // rule can be stated here, on the emitted code, rather than only in generated
 // text nothing runs.
@@ -299,7 +299,7 @@ TEST(WidenedRoundTrip, ARejectedElementReachesTheErrorChannel)
     j["uints"] = nlohmann::json::array({ "x", 5 });
 
     std::string why;
-    const Bag out = recFromWire_Bag(j, &why);
+    const Bag out = recFromWire_WidenedModule_Bag(j, &why);
 
     EXPECT_TRUE(out.uints.isEmpty());
     ASSERT_FALSE(why.empty()) << "silent-empty-with-ok: the caller cannot tell a refusal "
@@ -322,7 +322,7 @@ TEST(WidenedRoundTrip, AWrongShapedResponseReachesTheErrorChannel)
         nlohmann::json j = nlohmann::json::object();
         j["uints"] = nlohmann::json::object();
         std::string why;
-        const Bag out = recFromWire_Bag(j, &why);
+        const Bag out = recFromWire_WidenedModule_Bag(j, &why);
         EXPECT_TRUE(out.uints.isEmpty());
         EXPECT_NE(why.find("expected array"), std::string::npos) << why;
     }
@@ -330,7 +330,7 @@ TEST(WidenedRoundTrip, AWrongShapedResponseReachesTheErrorChannel)
         nlohmann::json j = nlohmann::json::object();
         j["counts"] = nlohmann::json::array({ 1 });
         std::string why;
-        const Bag out = recFromWire_Bag(j, &why);
+        const Bag out = recFromWire_WidenedModule_Bag(j, &why);
         EXPECT_TRUE(out.counts.isEmpty());
         EXPECT_NE(why.find("expected object"), std::string::npos) << why;
     }
@@ -341,7 +341,7 @@ TEST(WidenedRoundTrip, AGoodValueLeavesTheErrorChannelClean)
     // The control for the two above: without it, both are satisfied by a sink
     // that is filled on every decode.
     std::string why;
-    const Bag out = recFromWire_Bag(recToWire_Bag(makeBag()), &why);
+    const Bag out = recFromWire_WidenedModule_Bag(recToWire_WidenedModule_Bag(makeBag()), &why);
     EXPECT_TRUE(why.empty()) << why;
     EXPECT_EQ(out.uints, makeBag().uints);
 }
@@ -355,7 +355,7 @@ TEST(WidenedRoundTrip, ElementCheckingReachesNestedContainers)
     j["counts"] = { { "k", "not a number" } };
     j["buckets"] = { { "k", nlohmann::json::array({ "nope" }) } };
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
     ASSERT_EQ(out.grid.size(), 1);
     EXPECT_TRUE(out.grid.at(0).isEmpty());
     EXPECT_TRUE(out.counts.isEmpty());
@@ -372,11 +372,11 @@ TEST(WidenedRoundTrip, TheCodecOwnsWhatCountsAsAnInteger)
 {
     nlohmann::json whole = nlohmann::json::object();
     whole["uints"] = nlohmann::json::array({ 3.0 });
-    EXPECT_EQ(recFromWire_Bag(whole).uints, (QList<qulonglong>{ 3ULL }));
+    EXPECT_EQ(recFromWire_WidenedModule_Bag(whole).uints, (QList<qulonglong>{ 3ULL }));
 
     nlohmann::json fractional = nlohmann::json::object();
     fractional["uints"] = nlohmann::json::array({ 3.7 });
-    EXPECT_TRUE(recFromWire_Bag(fractional).uints.isEmpty());
+    EXPECT_TRUE(recFromWire_WidenedModule_Bag(fractional).uints.isEmpty());
 }
 
 // The untyped rows are untouched by all of the above, and must stay that way:
@@ -388,7 +388,7 @@ TEST(WidenedRoundTrip, AnyBottomedContainersStayUnchecked)
     j["loose"] = nlohmann::json::array({ "x", 5, true });
     j["attrs"] = { { "s", "x" }, { "n", 5 } };
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
     ASSERT_EQ(out.loose.size(), 3);
     EXPECT_EQ(out.loose.at(0).toString(), QStringLiteral("x"));
     EXPECT_EQ(out.loose.at(1).toLongLong(), 5);
@@ -413,7 +413,7 @@ TEST(WidenedRoundTrip, TypedMapSurvivesTheBytesTagCollision)
     j["labels"] = { { "_bytes", "hello" } };
     j["attrs"]  = { { "_bytes", "hello" } };
 
-    const Bag out = recFromWire_Bag(j);
+    const Bag out = recFromWire_WidenedModule_Bag(j);
 
     // TYPED: still a map, with its key and its string value intact.
     ASSERT_TRUE(out.labels.contains(QStringLiteral("_bytes")))
@@ -442,7 +442,7 @@ TEST(WidenedRoundTrip, TypedMapSurvivesTheBytesTagCollision)
 TEST(WidenedRoundTrip, AWrongShapedRecordReachesTheErrorChannel)
 {
     std::string why;
-    const Bag out = recFromWire_Bag(nlohmann::json::array({ 1, 2 }), &why);
+    const Bag out = recFromWire_WidenedModule_Bag(nlohmann::json::array({ 1, 2 }), &why);
 
     EXPECT_TRUE(out.uints.isEmpty());
     EXPECT_TRUE(out.label.isEmpty());
@@ -455,11 +455,11 @@ TEST(WidenedRoundTrip, AWrongShapedRecordReachesTheErrorChannel)
 // writes to the same sink, so the rejection travels out of the outer record.
 TEST(WidenedRoundTrip, AWrongShapedNESTEDRecordReachesTheErrorChannel)
 {
-    nlohmann::json j = recToWire_Bag(makeBag());
+    nlohmann::json j = recToWire_WidenedModule_Bag(makeBag());
     j["origin"] = 5;
 
     std::string why;
-    const Bag out = recFromWire_Bag(j, &why);
+    const Bag out = recFromWire_WidenedModule_Bag(j, &why);
 
     EXPECT_DOUBLE_EQ(out.origin.x, 0.0);
     ASSERT_FALSE(why.empty());
@@ -475,11 +475,11 @@ TEST(WidenedRoundTrip, AWrongShapedNESTEDRecordReachesTheErrorChannel)
 // `err.ok()` is no longer true.
 TEST(WidenedRoundTrip, AMistypedScalarFieldReachesTheErrorChannel)
 {
-    nlohmann::json j = recToWire_Bag(makeBag());
+    nlohmann::json j = recToWire_WidenedModule_Bag(makeBag());
     j["count"] = "not a number";
 
     std::string why;
-    const Bag out = recFromWire_Bag(j, &why);
+    const Bag out = recFromWire_WidenedModule_Bag(j, &why);
 
     EXPECT_EQ(out.count, 0ULL);
     EXPECT_EQ(out.label, QStringLiteral("bag")) << "the rest of the record still decodes";
@@ -490,11 +490,11 @@ TEST(WidenedRoundTrip, AMistypedScalarFieldReachesTheErrorChannel)
 
 TEST(WidenedRoundTrip, AMistypedScalarFieldOfANestedRecordReachesTheErrorChannel)
 {
-    nlohmann::json j = recToWire_Bag(makeBag());
+    nlohmann::json j = recToWire_WidenedModule_Bag(makeBag());
     j["origin"]["x"] = "nope";
 
     std::string why;
-    const Bag out = recFromWire_Bag(j, &why);
+    const Bag out = recFromWire_WidenedModule_Bag(j, &why);
 
     EXPECT_DOUBLE_EQ(out.origin.x, 0.0);
     EXPECT_DOUBLE_EQ(out.origin.y, -2.5) << "the sibling field still decodes";
@@ -517,7 +517,7 @@ TEST(WidenedRoundTrip, AStringListWithNonStringElementsIsRejectedNotStringified)
     j["names"] = nlohmann::json::array({ "a", 5, true, nlohmann::json::object() });
 
     std::string why;
-    const Bag out = recFromWire_Bag(j, &why);
+    const Bag out = recFromWire_WidenedModule_Bag(j, &why);
 
     ASSERT_NE(out.names, (QStringList{ QStringLiteral("a"), QStringLiteral("5"),
                                        QStringLiteral("true"), QString() }))
@@ -537,7 +537,7 @@ TEST(WidenedRoundTrip, AWrongShapedWholeCrossingContainerReachesTheErrorChannel)
         nlohmann::json j = nlohmann::json::object();
         j["loose"] = 5;
         std::string why;
-        const Bag out = recFromWire_Bag(j, &why);
+        const Bag out = recFromWire_WidenedModule_Bag(j, &why);
         EXPECT_TRUE(out.loose.isEmpty());
         EXPECT_NE(why.find("expected array"), std::string::npos) << why;
         EXPECT_NE(why.find("`[any]`"), std::string::npos) << why;
@@ -546,7 +546,7 @@ TEST(WidenedRoundTrip, AWrongShapedWholeCrossingContainerReachesTheErrorChannel)
         nlohmann::json j = nlohmann::json::object();
         j["attrs"] = nlohmann::json::array({ 1 });
         std::string why;
-        const Bag out = recFromWire_Bag(j, &why);
+        const Bag out = recFromWire_WidenedModule_Bag(j, &why);
         EXPECT_TRUE(out.attrs.isEmpty());
         EXPECT_NE(why.find("expected object"), std::string::npos) << why;
         EXPECT_NE(why.find("`{tstr: any}`"), std::string::npos) << why;
@@ -563,7 +563,7 @@ TEST(WidenedRoundTrip, AWellTypedStringListStillDecodes)
     j["attrs"] = { { "s", "x" } };
 
     std::string why;
-    const Bag out = recFromWire_Bag(j, &why);
+    const Bag out = recFromWire_WidenedModule_Bag(j, &why);
     EXPECT_TRUE(why.empty()) << why;
     EXPECT_EQ(out.names, (QStringList{ QStringLiteral("a"), QStringLiteral("b") }));
     EXPECT_EQ(out.loose.size(), 3);
@@ -622,7 +622,7 @@ TEST(WidenedRoundTrip, AMissingFieldKeepsItsDefaultOnPurpose)
     nlohmann::json j = nlohmann::json::object();   // no keys at all
 
     std::string why;
-    const Bag out = recFromWire_Bag(j, &why);
+    const Bag out = recFromWire_WidenedModule_Bag(j, &why);
 
     EXPECT_TRUE(why.empty()) << why;
     EXPECT_TRUE(out.label.isEmpty());

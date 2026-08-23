@@ -4,7 +4,7 @@
 ; Its record `Bag` is the load-bearing part: a record field is encoded and
 ; decoded by exactly the same generator expressions as a method argument and a
 ; return value, and — unlike a method — its codec is a plain function
-; (`recToWire_Bag` / `recFromWire_Bag`) that a test can call with real values.
+; (`recToWire_WidenedModule_Bag` / `recFromWire_WidenedModule_Bag`) that a test can call with real values.
 ; That is what makes roundtrip_tu.cpp a RUNTIME test of the emitted code rather
 ; than an assertion about generated text.
 module widened_module {
