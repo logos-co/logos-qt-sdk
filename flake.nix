@@ -141,16 +141,39 @@
             inherit pkgs common src protocolLib cppGenerator cppSdkInclude qtGenerator qtHost;
           };
 
+          # DO NOT add propagatedBuildInputs to this join. It is INERT, and the
+          # comment that used to sit here claimed the opposite -- it described a
+          # real hazard beside code that did not prevent it, which reads to the
+          # next person as "handled".
+          #
+          # Why it is inert, from nixpkgs' stdenv setup:
+          #
+          #   genericBuild() {
+          #     if [ -f "${buildCommandPath:-}" ]; then source "$buildCommandPath"; return; fi
+          #     if [ -n "${buildCommand:-}" ];     then eval   "$buildCommand";     return; fi
+          #     definePhases
+          #     for curPhase in ${phases[*]}; do runPhase "$curPhase"; done
+          #   }
+          #
+          # symlinkJoin is a buildCommand derivation, so genericBuild RETURNS
+          # before definePhases -- and fixupPhase, the ONLY writer of
+          # nix-support/propagated-build-inputs, never runs. The same is true of
+          # runCommand, buildEnv and writeShellApplication. What consumers
+          # actually read here is `lib`'s copy of that file, lndir'd in; the
+          # attribute declared on the join is not even a reference. Measured
+          # three ways: declaring `dep` on a join whose paths propagate zlib
+          # yields zlib and not dep; with no nix-support in any path, $out has no
+          # nix-support at all; and when two paths both propagate, lndir drops
+          # the collision and the SECOND one is silently discarded.
+          #
+          # So propagation is decided in nix/lib.nix, which is where qtHost was
+          # removed from -- see the header there for what that export broke.
+          # If this package ever genuinely needs to propagate something, declare
+          # it on a real mkDerivation among `paths` (order matters, first wins)
+          # or write the file in postBuild; do not declare it here.
           qtSdk = pkgs.symlinkJoin {
             name = "logos-qt-sdk";
             paths = [ lib include ];
-            # qtHost is propagated by the JOIN as well as by `lib`, because
-            # symlinkJoin does not inherit the propagated inputs of the paths it
-            # joins and this attribute — not `lib` — is what consumers add to
-            # their buildInputs. Without it a consumer's find_package(
-            # logos-qt-sdk) would fall back to the Config's baked HINTS instead
-            # of resolving logos-qt-host off CMAKE_PREFIX_PATH.
-            propagatedBuildInputs = common.propagatedBuildInputs ++ [ qtHost ];
           };
         in
         {
@@ -164,7 +187,7 @@
         }
       );
 
-      checks = forAllSystems ({ pkgs, protocolLib, cppGenerator, cppSdkInclude, lidlPkg, qtHost, ... }:
+      checks = forAllSystems ({ pkgs, system, protocolLib, cppGenerator, cppSdkInclude, lidlPkg, qtHost, ... }:
         let
           common = import ./nix/default.nix { inherit pkgs; };
           src = ./.;
@@ -179,6 +202,15 @@
         in
         {
           inherit tests;
+
+          # This package must not export a logos-qt-host IDENTITY -- see
+          # nix/checks/no-qt-host-export.nix for what that broke and why the
+          # assertion is a scan rather than three targeted greps. Run in CI,
+          # not merely exposed here.
+          no-qt-host-export = import ./nix/checks/no-qt-host-export.nix {
+            inherit pkgs;
+            subject = self.packages.${system}.logos-qt-sdk;
+          };
         }
       );
 

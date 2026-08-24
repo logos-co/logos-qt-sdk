@@ -34,6 +34,31 @@ macros), and the legacy `QObject`/`Q_INVOKABLE` provider glue
 > re-exported `logos_api.h` & co. from this prefix are gone; the only copy of
 > those headers in any closure is logos-qt-host's.
 >
+> **`find_package(logos-qt-sdk)` no longer resolves logos-qt-host FOR you, and
+> that is deliberate.** The Config asks for it by name (`find_dependency`) with
+> no hint about where it lives, so a consumer must have logos-qt-host on
+> `CMAKE_PREFIX_PATH` — in Nix, by taking
+> `logos-plugin-qt.packages.<sys>.logos-qt-host` as its own input and passing
+> `-DLOGOS_QT_HOST_ROOT`. A consumer that forgets fails at CONFIGURE time,
+> naming the missing package.
+>
+> This package used to answer that question itself, two ways: it propagated its
+> own `qtHost` as a build input, and it baked the store path logos-qt-host was
+> found at into the generated Config as `find_package` HINTS. Both exported an
+> *identity*. A consumer silently compiled and linked the qt-host **logos-qt-sdk**
+> had chosen instead of the one in its own closure, so two logos-qt-host prefixes
+> coexisted in one `nix build` with consumers split between them — and when
+> logos-qt-host gained `Q_INVOKABLE currentCallerJson`, `logos_host_qt` could not
+> see it: `QMetaObject::invokeMethod` failed at RUNTIME with `No such method` in
+> every module process and `current_caller()` returned `{"kind":"unknown"}`
+> fleet-wide, on a green build. `checks.no-qt-host-export` now asserts that this
+> prefix names no logos-qt-host store path at all.
+>
+> Resolve logos-qt-host BEFORE `find_package(logos-qt-sdk)`, and assert
+> `logos-qt-host_DIR` afterwards: `find_package` is first-wins and the losing
+> call is silent, so a second one — even `REQUIRED` with explicit `PATHS` and
+> `NO_DEFAULT_PATH` — succeeds and changes nothing.
+>
 > What this repo still OWNS is `logos_qt_lp_bridge.h`, `logos_qt_wire.h`,
 > `logos_qt_host_core.h` and the `logos-qt-generator` binary.
 >

@@ -228,18 +228,24 @@ install(EXPORT logos-qt-sdkTargets
 
 include(CMakePackageConfigHelpers)
 
-# Where logos-qt-host was found when THIS package was built, baked into the
-# generated Config as a HINTS fallback.
+# There is deliberately NO LOGOS_QT_HOST_HINT here any more.
 #
-# `logos-qt-sdk::logos_qt_sdk` names logos-qt-host in its link interface, so a
-# consumer that imports this package MUST be able to resolve logos-qt-host or
-# the import fails outright. Most of them call
-# `find_package(logos-qt-sdk PATHS <prefix> NO_DEFAULT_PATH)`, which tells CMake
-# nothing about where anything else lives. HINTS is consulted AFTER
-# CMAKE_PREFIX_PATH, so a consumer that does know (every Nix build, where
-# logos-qt-host is a propagated input of this package) still wins; the hint only
-# catches the ones that do not.
-set(LOGOS_QT_HOST_HINT "${logos-qt-host_DIR}")
+# This used to bake ${logos-qt-host_DIR} -- the prefix logos-qt-host was found at
+# when THIS package was built -- into the generated Config as a find_package
+# HINTS fallback, for consumers that locate this package by an explicit
+# NO_DEFAULT_PATH and so tell CMake nothing about where anything else lives.
+#
+# It was a second copy of an IDENTITY this package has no business exporting.
+# Together with the propagated input in nix/lib.nix it meant a consumer compiled
+# and linked the qt-host that logos-qt-sdk chose, not the one in its own closure
+# -- silently, with a green build, until QMetaObject::invokeMethod hit "No such
+# method" at runtime. Removing the propagation alone would have left this line
+# to take over the moment CMAKE_PREFIX_PATH stopped answering, turning a loud
+# configure failure back into a silent wrong answer. Both had to go.
+#
+# The Config now asks for logos-qt-host BY NAME (find_dependency), so a consumer
+# that has not resolved it fails at configure time with a message naming the
+# package. That is the intended failure mode; see logos-qt-sdkConfig.cmake.in.
 
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/logos-qt-sdkConfig.cmake.in"

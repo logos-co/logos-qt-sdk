@@ -10,16 +10,31 @@ find_dependency(Qt6 REQUIRED COMPONENTS Core RemoteObjects)
 find_dependency(logos-protocol REQUIRED)
 
 # logos_qt_sdk carries no code of its own any more: the Qt host runtime lives in
-# logos-qt-host and this package re-exports it. Resolving it here is what keeps
-# `find_package(logos-qt-sdk)` a complete request — a consumer gets the same
-# headers and the same archive it always did, without naming a second package.
+# logos-qt-host, and logos-qt-sdk::logos_qt_sdk names it in its link interface —
+# so importing this package REQUIRES logos-qt-host to be resolvable.
 #
-# The baked HINTS is the prefix logos-qt-host was found at when this package was
-# built; it is consulted after CMAKE_PREFIX_PATH, so it is a fallback for
-# consumers that locate this package by an explicit NO_DEFAULT_PATH, never an
-# override.
+# It is asked for BY NAME, with no hint about where to find it. That is the
+# whole point. This file used to carry `HINTS "<the store path logos-qt-sdk was
+# built against>"`, and nix/lib.nix propagated the same prefix, so a consumer
+# silently got the qt-host logos-qt-sdk had chosen instead of the one in its own
+# closure. Nothing failed; the build went green and QMetaObject::invokeMethod
+# failed at RUNTIME with "No such method" once the two revs diverged.
+#
+# The cost of naming it without a hint is real and deliberate:
+# find_package(logos-qt-sdk) is no longer a self-sufficient request. A consumer
+# outside Nix, or one that locates this package with PATHS + NO_DEFAULT_PATH and
+# has nothing else on CMAKE_PREFIX_PATH, must now resolve logos-qt-host too. It
+# fails immediately, at this call site, naming the missing package — which is
+# strictly better than linking the wrong one.
+#
+# The TARGET guard is not an optimisation: find_package is FIRST-WINS
+# (logos-qt-hostTargets.cmake `return()`s on re-inclusion), so a consumer that
+# has already resolved its own logos-qt-host has ALREADY decided, and this call
+# must not appear to re-decide. Consumers should call
+# `find_package(logos-qt-host REQUIRED CONFIG PATHS <theirs> NO_DEFAULT_PATH)`
+# BEFORE find_package(logos-qt-sdk), and assert logos-qt-host_DIR afterwards.
 if(NOT TARGET logos-qt-host::logos_qt_host)
-    find_package(logos-qt-host REQUIRED CONFIG HINTS "@LOGOS_QT_HOST_HINT@")
+    find_dependency(logos-qt-host REQUIRED)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/logos-qt-sdkTargets.cmake")
