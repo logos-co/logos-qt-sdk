@@ -414,11 +414,35 @@ _qtgen_test(whole_crossing_containers_are_checked generate consumer plain_module
 # that emitter or the two diverge. Asserted so that moving the line means
 # deleting a test that says not to, rather than noticing a golden moved.
 # roundtrip_tu.cpp's ABareScalarSlotIsLenientOnPurpose is the runtime twin.
+#
+# LogosResult IS NO LONGER ON THIS LIST, and that is the one deliberate
+# exception rather than the line moving. The others bottom out at a value no
+# provider means as an answer -- "" for a string, 0 for a number. LogosResult's
+# default is `success = false` with no error, which is precisely what a provider
+# sends when it REFUSES a call, so leniency there did not produce a harmless
+# placeholder: it produced a forged rejection, returned for every input
+# including the well-formed ones. `logosResultFromReply` replaces the lenient
+# whole-value decode on that one type.
+#
+# The warning this comment used to carry -- tighten it "taken together with that
+# emitter or the two diverge" -- was heeded, not overridden: logos-cpp-sdk's lp
+# surface has the identical function (logos::jsonToStdResult, same opening
+# `if (!is_object)`) and it is tightened in the same way, in the same change.
+# The bare scalars stay lenient on BOTH surfaces.
 _qtgen_test(bare_scalar_slots_stay_lenient generate consumer plain_module.lidl
             REQUIRE_TEXT "logos::qt::fromWire<QString>(_r)"
                          "logos::qt::fromWire<qulonglong>(_r)"
                          "logos::qt::fromWire<QVariant>(_r)"
-                         "logos::qt::fromWire<LogosResult>(_r)")
+            FORBID_TEXT "logos::qt::fromWire<LogosResult>(_r)")
+
+# The LogosResult exception itself, pinned so it cannot quietly revert to the
+# lenient decode: a reply that is not an object must report what it got, and a
+# transport failure must report its own message, on all three surfaces.
+_qtgen_test(a_result_reply_that_cannot_be_read_says_so generate consumer plain_module.lidl
+            REQUIRE_TEXT "void logosResultFromReply(const nlohmann::json& r, const logos::CallError& err,"
+                         "expected a result object, got "
+                         "logosResultFromReply(_r, _err, m_moduleName.toStdString(), _out)"
+                         "logosResultFromReply(_r, _res.error, _target, _res.value)")
 
 # The METHOD-level half of the error channel, which no test can execute: a
 # generated body calls the bridge, and there is no bridge here. So it is pinned
