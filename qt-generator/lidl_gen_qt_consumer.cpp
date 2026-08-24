@@ -827,6 +827,60 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             if (!isVoid(mtd.returnType) && decodeUsesSink(module, mtd.returnType)) return true;
         return false;
     }();
+    // A LogosResult RETURN is the one shape whose default-constructed value is
+    // a legitimate provider answer, so it needs a conversion that can say "I
+    // could not read this" IN the value. Gated on its own question, not on
+    // `anyReturnDecodes`: `result` is a bare primitive, so decodeUsesSink() is
+    // false for it and the sink machinery never sees it.
+    const bool anyReturnIsResult = [&] {
+        for (const MethodDecl& mtd : module.methods)
+            if (!isVoid(mtd.returnType)
+                && surfaceType(module, mtd.returnType, QString(), false)
+                       == QLatin1String("LogosResult"))
+                return true;
+        return false;
+    }();
+    if (anyReturnIsResult) {
+        s << "#ifndef LOGOS_GENERATED_RESULT_FROM_REPLY\n";
+        s << "#define LOGOS_GENERATED_RESULT_FROM_REPLY\n\n";
+        s << "namespace {\n\n";
+        // WHY THIS EXISTS.
+        //
+        // `logos::jsonToLogosResult` opens with `if (!j.is_object()) return r;`
+        // where `r` is `success = false` and nothing else set. That is not a
+        // decode diagnostic -- it is byte-for-byte what a provider sends when
+        // it REFUSES a call. So a wrapper bound to a provider whose return
+        // shape it cannot read answered `{success:false, value:null,
+        // error:null}` for every input, indistinguishable from a rejection it
+        // never received. Measured against a `-> result` wrapper bound to a
+        // `-> ?tstr` provider: every call, including the well-formed ones,
+        // came back as that same refusal.
+        //
+        // The information was never missing -- `logos::CallError` and the
+        // reply's own type both knew. Only the value did not, and the value is
+        // all a caller who passed no CallError* ever sees. Both async surfaces
+        // and the default sync signature are exactly that caller.
+        s << "void logosResultFromReply(const nlohmann::json& r, const logos::CallError& err,\n";
+        s << "                          const std::string& origin, LogosResult& out)\n";
+        s << "{\n";
+        s << "    if (!err.ok()) {\n";
+        s << "        out.success = false;\n";
+        s << "        out.value = QVariant();\n";
+        s << "        out.error = QString::fromStdString(origin + \": \" + err.message);\n";
+        s << "        return;\n";
+        s << "    }\n";
+        s << "    if (!r.is_object()) {\n";
+        s << "        out.success = false;\n";
+        s << "        out.value = QVariant();\n";
+        s << "        out.error = QString::fromStdString(\n";
+        s << "            origin + \": expected a result object, got \" + r.type_name());\n";
+        s << "        return;\n";
+        s << "    }\n";
+        s << "    out = logos::jsonToLogosResult(r);\n";
+        s << "}\n\n";
+        s << "} // namespace\n\n";
+        s << "#endif  // LOGOS_GENERATED_RESULT_FROM_REPLY\n\n";
+    }
     if (anyReturnDecodes) {
         s << "#ifndef LOGOS_GENERATED_DECODE_FAILURE_JSON\n";
         s << "#define LOGOS_GENERATED_DECODE_FAILURE_JSON\n\n";
@@ -1094,6 +1148,9 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         // grow an error sink and the fold below it. A method returning a
         // scalar, `any` or void emits exactly the lines it always did.
         const bool retDecodes = !retVoid && decodeUsesSink(module, mtd.returnType);
+        // NOT `&& retDecodes`: `result` is a bare primitive, so the sink
+        // machinery is not on this path at all. See logosResultFromReply.
+        const bool retIsResult = !retVoid && ret == QLatin1String("LogosResult");
 
         // Sync. The caller's Timeout is threaded into the C ABI's timeout_ms
         // just as the async paths do.
@@ -1112,7 +1169,14 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "    if (err) *err = _err;\n";
         s << "    else if (!_err.ok()) qWarning() << \"" << className << "::" << qs(mtd.name)
           << ": remote call failed:\" << QString::fromStdString(_err.message);\n";
-        if (retDecodes) {
+        if (retIsResult) {
+            // The value says what happened, unconditionally -- `err` is opt-in
+            // and defaulted off, and the caller who passes nothing is exactly
+            // the one who was being told "the provider refused you".
+            s << "    " << retQual << " _out;\n";
+            s << "    logosResultFromReply(_r, _err, m_moduleName.toStdString(), _out);\n";
+            s << "    return _out;\n";
+        } else if (retDecodes) {
             // The decode runs into a NAMED local so its rejection can be folded
             // afterwards. It cannot be folded before: the rejection is only
             // known once the decode has walked the value.
@@ -1148,7 +1212,10 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "    if (!callback) return;\n";
         emitArgs();
         s << "    logos::qt::invokeAsync(m_bridge, \"" << qs(mtd.name) << "\", _args,\n";
-        s << "        [callback](nlohmann::json _r) {\n";
+        if (retIsResult)
+            s << "        [callback, _target = m_moduleName.toStdString()](nlohmann::json _r) {\n";
+        else
+            s << "        [callback](nlohmann::json _r) {\n";
         // The value-only callback has nowhere to put an error, so a rejection
         // is at least made visible in the module log rather than vanishing into
         // the return conversion below. `<name>AsyncResult` is the surface that
@@ -1164,8 +1231,18 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             // which is where the element loops already put it. The sink is
             // NULL rather than absent because the decode expression names it.
             // `<name>AsyncResult` is the surface that reports it.
-            if (retDecodes) s << "            " << declareSink("nullptr") << "\n";
-            s << "            callback(" << fromWire(module, mtd.returnType, "_r", qual) << ");\n";
+            if (retIsResult) {
+                // This surface has nowhere else to put it: the callback takes a
+                // bare value. `_rej` is the rejection the block above already
+                // decoded, reused rather than re-derived.
+                s << "            " << ret << " _out;\n";
+                s << "            { logos::CallError _e; logosDispatchRejectionJson(_r, _e);\n";
+                s << "              logosResultFromReply(_r, _e, _target, _out); }\n";
+                s << "            callback(_out);\n";
+            } else {
+                if (retDecodes) s << "            " << declareSink("nullptr") << "\n";
+                s << "            callback(" << fromWire(module, mtd.returnType, "_r", qual) << ");\n";
+            }
         }
         s << "        }, timeout.ms);\n";
         s << "}\n\n";
@@ -1188,7 +1265,7 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         // The target's name is CAPTURED, not read off `this`: the callback runs
         // after this function returns, and a wrapper is a copyable handle that
         // may not outlive the call.
-        if (retDecodes)
+        if (retDecodes || retIsResult)
             s << "        [callback, _target = m_moduleName.toStdString()]"
                  "(nlohmann::json _r, const logos::CallError& _err) {\n";
         else
@@ -1210,6 +1287,10 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             s << "            _res.value = " << fromWire(module, mtd.returnType, "_r", qual)
               << ";\n";
             s << "            logosNoteDecodeFailure(_derr, _target, _res.error);\n";
+        } else if (retIsResult) {
+            // _res.error already carries it, but callers read _res.value too,
+            // and for LogosResult that default is a provider answer.
+            s << "            logosResultFromReply(_r, _res.error, _target, _res.value);\n";
         } else {
             s << "            _res.value = " << fromWire(module, mtd.returnType, "_r", qual) << ";\n";
         }
