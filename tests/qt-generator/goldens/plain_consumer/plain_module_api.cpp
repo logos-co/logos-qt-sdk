@@ -29,6 +29,34 @@ bool logosDispatchRejectionJson(const nlohmann::json& v, logos::CallError& out)
 
 #endif  // LOGOS_GENERATED_DISPATCH_REJECTION_JSON
 
+#ifndef LOGOS_GENERATED_RESULT_FROM_REPLY
+#define LOGOS_GENERATED_RESULT_FROM_REPLY
+
+namespace {
+
+void logosResultFromReply(const nlohmann::json& r, const logos::CallError& err,
+                          const std::string& origin, LogosResult& out)
+{
+    if (!err.ok()) {
+        out.success = false;
+        out.value = QVariant();
+        out.error = QString::fromStdString(origin + ": " + err.message);
+        return;
+    }
+    if (!r.is_object()) {
+        out.success = false;
+        out.value = QVariant();
+        out.error = QString::fromStdString(
+            origin + ": expected a result object, got " + r.type_name());
+        return;
+    }
+    out = logos::jsonToLogosResult(r);
+}
+
+} // namespace
+
+#endif  // LOGOS_GENERATED_RESULT_FROM_REPLY
+
 #ifndef LOGOS_GENERATED_DECODE_FAILURE_JSON
 #define LOGOS_GENERATED_DECODE_FAILURE_JSON
 
@@ -600,7 +628,9 @@ LogosResult PlainModule::fetch(const QString& id, logos::CallError* err, Timeout
     if (_err.ok()) logosDispatchRejectionJson(_r, _err);
     if (err) *err = _err;
     else if (!_err.ok()) qWarning() << "PlainModule::fetch: remote call failed:" << QString::fromStdString(_err.message);
-    return logos::qt::fromWire<LogosResult>(_r);
+    LogosResult _out;
+    logosResultFromReply(_r, _err, m_moduleName.toStdString(), _out);
+    return _out;
 }
 
 void PlainModule::fetchAsync(const QString& id, std::function<void(LogosResult)> callback, Timeout timeout) {
@@ -608,10 +638,13 @@ void PlainModule::fetchAsync(const QString& id, std::function<void(LogosResult)>
     nlohmann::json _args = nlohmann::json::array();
     _args.push_back(logos::qt::toWire(QVariant::fromValue(id)));
     logos::qt::invokeAsync(m_bridge, "fetch", _args,
-        [callback](nlohmann::json _r) {
+        [callback, _target = m_moduleName.toStdString()](nlohmann::json _r) {
             { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))
                   qWarning() << "PlainModule::fetchAsync: remote call failed:" << QString::fromStdString(_rej.message); }
-            callback(logos::qt::fromWire<LogosResult>(_r));
+            LogosResult _out;
+            { logos::CallError _e; logosDispatchRejectionJson(_r, _e);
+              logosResultFromReply(_r, _e, _target, _out); }
+            callback(_out);
         }, timeout.ms);
 }
 
@@ -620,11 +653,11 @@ void PlainModule::fetchAsyncResult(const QString& id, std::function<void(logos::
     nlohmann::json _args = nlohmann::json::array();
     _args.push_back(logos::qt::toWire(QVariant::fromValue(id)));
     logos::qt::invokeAsyncResult(m_bridge, "fetch", _args,
-        [callback](nlohmann::json _r, const logos::CallError& _err) {
+        [callback, _target = m_moduleName.toStdString()](nlohmann::json _r, const logos::CallError& _err) {
             logos::AsyncResult<LogosResult> _res;
             _res.error = _err;
             if (_res.error.ok()) logosDispatchRejectionJson(_r, _res.error);
-            _res.value = logos::qt::fromWire<LogosResult>(_r);
+            logosResultFromReply(_r, _res.error, _target, _res.value);
             callback(_res);
         }, timeout.ms);
 }
