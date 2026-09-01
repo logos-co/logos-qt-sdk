@@ -114,8 +114,10 @@ TEST_F(InformModuleTokenAuthTest, PeerCannotPlantTokenThenAuthorizeCall)
     EXPECT_FALSE(plantedGarbage)
         << "informModuleToken with a non-trusted authToken must be rejected (F-002)";
 
-    // 2) Neither planted value may exist in the token store...
-    EXPECT_TRUE(TokenManager::instance().getToken("attacker").isEmpty())
+    // 2) Neither planted value may exist in the token store. The INBOUND half:
+    // that is where an accepted plant lands, so asking the outbound half here
+    // would answer empty whether or not the gate held.
+    EXPECT_FALSE(TokenManager::instance().inbound().contains("attacker"))
         << "a rejected plant must not be stored";
 
     // 3) ...and presenting them to callRemoteMethod must NOT authorize a call.
@@ -144,7 +146,7 @@ TEST_F(InformModuleTokenAuthTest, TrustedChannelCanPlantToken)
     bool ok = proxy.informModuleToken("the-module-core-secret", "caller_mod", "issued-tok");
 
     EXPECT_TRUE(ok) << "the trusted core/capability_module channel must be able to plant tokens";
-    EXPECT_EQ(TokenManager::instance().getToken("caller_mod"), "issued-tok");
+    EXPECT_EQ(TokenManager::instance().inbound().token("caller_mod"), "issued-tok");
 
     // And the token it issued is now usable by that caller — the intended flow.
     QVariant r = proxy.callRemoteMethod("issued-tok", "privilegedMethod", {QVariant(7)});
@@ -162,7 +164,7 @@ TEST_F(InformModuleTokenAuthTest, IssuedBusinessTokenCannotUnlockPlanting)
     ModuleProxy proxy(m_provider);
     seedTrustedSecret("the-module-core-secret");
     // A normal per-caller token exists in the store (as if previously issued).
-    TokenManager::instance().saveToken("some_caller", "a-business-token");
+    TokenManager::instance().saveInboundToken("some_caller", "a-business-token");
 
     // Presenting that business token as the authToken must NOT authorize a plant.
     bool planted = proxy.informModuleToken("a-business-token", "attacker", "PWN-TOKEN");
@@ -170,5 +172,5 @@ TEST_F(InformModuleTokenAuthTest, IssuedBusinessTokenCannotUnlockPlanting)
     EXPECT_FALSE(planted)
         << "only the core/capability_module secret may authorize informModuleToken, "
            "not an arbitrary issued business token";
-    EXPECT_TRUE(TokenManager::instance().getToken("attacker").isEmpty());
+    EXPECT_FALSE(TokenManager::instance().inbound().contains("attacker"));
 }

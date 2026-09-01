@@ -130,9 +130,9 @@ TEST_F(AuthTokenEnforcementTest, AcceptsTokenIssuedViaTokenManager)
 {
     ModuleProxy proxy(m_provider);
 
-    // The capability flow stores the issued token in TokenManager keyed by the
-    // requesting module (informModuleToken -> TokenManager::saveToken).
-    TokenManager::instance().saveToken("caller_mod", "issued-tok");
+    // The capability flow files the issued token in the INBOUND half, keyed by
+    // the caller it was issued to (informModuleToken -> saveInboundToken).
+    TokenManager::instance().saveInboundToken("caller_mod", "issued-tok");
 
     QVariant r = proxy.callRemoteMethod("issued-tok", "privilegedMethod", {QVariant(1)});
 
@@ -158,7 +158,7 @@ TEST_F(AuthTokenEnforcementTest, RejectsTokenNotMatchingAnyIssued)
     ModuleProxy proxy(m_provider);
 
     // A valid token exists for some caller, but the peer presents a different one.
-    TokenManager::instance().saveToken("caller_mod", "issued-tok");
+    TokenManager::instance().saveInboundToken("caller_mod", "issued-tok");
 
     QVariant r = proxy.callRemoteMethod("some-other-token", "privilegedMethod", {QVariant(1)});
 
@@ -175,7 +175,7 @@ TEST_F(AuthTokenEnforcementTest, RejectsTokenNotMatchingAnyIssued)
 TEST_F(AuthTokenEnforcementTest, WrongTokenBlockedCorrectTokenAllowed)
 {
     ModuleProxy proxy(m_provider);
-    TokenManager::instance().saveToken("caller_mod", "the-real-token");
+    TokenManager::instance().saveInboundToken("caller_mod", "the-real-token");
 
     // 1) Wrong token: must NOT dispatch, must NOT return a result.
     QVariant wrong = proxy.callRemoteMethod("not-the-token", "privilegedMethod", {QVariant(1)});
@@ -240,7 +240,7 @@ TEST_F(AuthTokenEnforcementTest, ValidatorIsAdditiveNotAReplacement)
     // A validator that rejects everything must not disable the built-in scan —
     // a token issued through TokenManager still authorizes.
     proxy.setTokenValidator([](const QString&, const QString&) { return false; });
-    TokenManager::instance().saveToken("caller_mod", "issued-tok");
+    TokenManager::instance().saveInboundToken("caller_mod", "issued-tok");
 
     QVariant r = proxy.callRemoteMethod("issued-tok", "privilegedMethod", {QVariant(1)});
     EXPECT_EQ(r.toString(), "dispatched");
@@ -303,7 +303,7 @@ TEST_F(LegacyPluginAuthTest, RejectsGarbageTokenForLegacyQObjectPlugin)
 TEST_F(LegacyPluginAuthTest, AcceptsIssuedTokenForLegacyQObjectPlugin)
 {
     ModuleProxy proxy(m_qtProvider);
-    TokenManager::instance().saveToken("caller_mod", "issued-tok");
+    TokenManager::instance().saveInboundToken("caller_mod", "issued-tok");
 
     QVariant r = proxy.callRemoteMethod("issued-tok", "deleteAllData",
                                         {QVariant("everything")});
@@ -352,7 +352,7 @@ TEST_F(AuthEnforcementTransportTest, WrongTokenBlockedThroughTransport)
     LogosObject* obj = conn.requestObject("auth_mod", 5000);
     ASSERT_NE(obj, nullptr);
 
-    TokenManager::instance().saveToken("caller_mod", "the-real-token");
+    TokenManager::instance().saveInboundToken("caller_mod", "the-real-token");
 
     // A peer with the wrong token hits the published object directly.
     QVariant r = obj->callMethod("forged-token", "privilegedMethod", {QVariant(1)}, 5000);
@@ -371,7 +371,7 @@ TEST_F(AuthEnforcementTransportTest, CorrectTokenAllowedThroughTransport)
     LogosObject* obj = conn.requestObject("auth_mod", 5000);
     ASSERT_NE(obj, nullptr);
 
-    TokenManager::instance().saveToken("caller_mod", "the-real-token");
+    TokenManager::instance().saveInboundToken("caller_mod", "the-real-token");
 
     QVariant r = obj->callMethod("the-real-token", "privilegedMethod", {QVariant(1)}, 5000);
     EXPECT_EQ(r.toString(), "dispatched");
