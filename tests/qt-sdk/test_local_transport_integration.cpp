@@ -205,7 +205,7 @@ TEST_F(LocalTransportIntegrationTest, InformModuleTokenDelegatesToProvider)
 
     bool result = obj->informModuleToken("trusted-secret", "target_mod", "secret_tok", 5000);
     EXPECT_TRUE(result);
-    EXPECT_EQ(TokenManager::instance().getToken("target_mod"), "secret_tok");
+    EXPECT_EQ(TokenManager::instance().inbound().token("target_mod"), "secret_tok");
     obj->release();
 }
 

@@ -115,7 +115,7 @@ TEST_F(LogosProviderBaseTest, InformModuleTokenSavesViaTokenManager)
     provider.init(&api);
 
     EXPECT_TRUE(provider.informModuleToken("other_mod", "tok123"));
-    EXPECT_EQ(TokenManager::instance().getToken("other_mod"), "tok123");
+    EXPECT_EQ(TokenManager::instance().inbound().token("other_mod"), "tok123");
 }
 
 TEST_F(LogosProviderBaseTest, InformModuleTokenFailsIfNotInitialized)
