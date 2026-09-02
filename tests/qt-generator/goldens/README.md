@@ -18,6 +18,35 @@ logos-qt-generator --lidl fixtures/plain_module.lidl --backend consumer \
 
 ## History
 
+### logos-protocol 0.9 — per-MODULE subscription state
+
+Reviewed, then regenerated. This entry REPLACES a short-lived one that recorded
+a per-SUBSCRIPTION form of the same feature (a defaulted
+`logos::SubscribeOptions` on every event accessor, routed through
+`logos::qt::subscribeOpts`). That shape was wrong about the granularity —
+losing a provider is a per-module event, since every subscription to a module
+hangs off its single handle — and it was revised before leaving the tree. The
+goldens now show the per-module form, and this note exists so a reader who finds
+the old shape in the history knows it was withdrawn rather than lost.
+
+The diff against the pre-0.9 goldens is exactly three things per binding, and
+nothing else:
+
+- `+#include "logos_lp_client.h"` in the header — the new accessors name
+  `logos::SubStatus` and `logos::RestartPolicy`, so those have to be COMPLETE in
+  the header, not merely in the .cpp where the bridge already arrived. Emitted
+  only when the module has events.
+- `onMoved(...)` loses the options parameter and goes back to its pre-0.9
+  signature, with the body routing through `logos::qt::subscribe` again.
+- four accessors appended ONCE per module (not once per event):
+  `onSubscriptionStatus`, `subscriptionGeneration`, `setRestartPolicy`,
+  `rearmSubscriptions`.
+
+What did NOT change is the point of keeping this golden: every method, every
+record codec, every async overload and the whole payload decode are
+byte-identical. A module that never asks about subscription state behaves
+exactly as before.
+
 Captured first from the generator at `cde7d42` (pre-optionality). The
 optional-parameters change left the **consumer** backend byte-identical — its
 optionality handling fires only for an optional field, so a contract without one

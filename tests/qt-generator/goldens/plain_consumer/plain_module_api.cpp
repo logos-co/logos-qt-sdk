@@ -133,6 +133,22 @@ bool PlainModule::onMoved(std::function<void(const Point& from, const Point& to)
     });
 }
 
+void PlainModule::onSubscriptionStatus(std::function<void(logos::SubStatus, std::uint64_t)> cb) {
+    logos::qt::onSubscriptionStatus(m_bridge, std::move(cb));
+}
+
+std::uint64_t PlainModule::subscriptionGeneration() {
+    return logos::qt::subscriptionGeneration(m_bridge);
+}
+
+void PlainModule::setRestartPolicy(logos::RestartPolicy policy) {
+    logos::qt::setRestartPolicy(m_bridge, policy);
+}
+
+bool PlainModule::rearmSubscriptions() {
+    return logos::qt::rearmSubscriptions(m_bridge);
+}
+
 QString PlainModule::echo_text(const QString& s, logos::CallError* err, Timeout timeout) {
     nlohmann::json _args = nlohmann::json::array();
     _args.push_back(logos::qt::toWire(QVariant::fromValue(s)));
