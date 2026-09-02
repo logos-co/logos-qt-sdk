@@ -8,6 +8,7 @@
 #include <functional>
 #include <utility>
 #include "logos_types.h"
+#include "logos_lp_client.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
 #include "logos_call_error.h"
@@ -32,6 +33,17 @@ public:
     bool on(const QString& eventName, RawEventCallback callback);
     bool on(const QString& eventName, EventCallback callback);
     bool onMoved(std::function<void(const Point& from, const Point& to)> callback);
+
+    // Watch this module's subscription transitions: Armed / Lost /
+    // Held / Abandoned, with the establishment number. Lost followed by
+    // Armed at a higher generation is the unrecoverable-gap marker.
+    void onSubscriptionStatus(std::function<void(logos::SubStatus, std::uint64_t)> cb);
+    // 0 = never armed, 1 = the first, N+1 after each re-establishment.
+    std::uint64_t subscriptionGeneration();
+    // Manual means "do not RE-arm after a loss", never "do not arm".
+    void setRestartPolicy(logos::RestartPolicy policy);
+    // Revive held subscriptions. Safe from inside the status callback.
+    bool rearmSubscriptions();
 
     QString echo_text(const QString& s, logos::CallError* err = nullptr, Timeout timeout = Timeout());
     void echo_textAsync(const QString& s, std::function<void(QString)> callback, Timeout timeout = Timeout());

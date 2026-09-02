@@ -614,6 +614,12 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
     s << "#include <utility>\n";
     if (moduleUsesStdOptional(module)) s << "#include <optional>\n";
     s << "#include \"logos_types.h\"\n";
+    // The per-module subscription-state accessors name logos::SubStatus and
+    // logos::RestartPolicy, so those have to be complete in the HEADER — not
+    // just in the .cpp, where the bridge arrives. They are only reachable
+    // through the lp client header; the Qt consumer otherwise never names
+    // anything from there.
+    if (!module.events.empty()) s << "#include \"logos_lp_client.h\"\n";
     // The LogosAPI-free flavour names neither LogosAPI nor LogosAPIClient, so
     // it includes neither. `Timeout` (every method's trailing deadline) then
     // has to be named directly: it lives in logos_mode.h, which the consumer
@@ -668,9 +674,26 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
     for (const EventDecl& ev : module.events) {
         if (ev.name.empty()) continue;
         s << "    bool " << eventAccessor(ev.name)
-          << "(std::function<void(" << eventCbParams(module, ev) << ")> callback);\n";
+          << "(std::function<void(" << eventCbParams(module, ev)
+          << ")> callback);\n";
     }
-    if (!module.events.empty()) s << "\n";
+    // The target's subscription state. ONCE per module, not once per event:
+    // every subscription here shares the provider's single handle, so they arm
+    // and are lost together.
+    if (!module.events.empty()) {
+        s << "\n";
+        s << "    // Watch this module's subscription transitions: Armed / Lost /\n";
+        s << "    // Held / Abandoned, with the establishment number. Lost followed by\n";
+        s << "    // Armed at a higher generation is the unrecoverable-gap marker.\n";
+        s << "    void onSubscriptionStatus(std::function<void(logos::SubStatus, std::uint64_t)> cb);\n";
+        s << "    // 0 = never armed, 1 = the first, N+1 after each re-establishment.\n";
+        s << "    std::uint64_t subscriptionGeneration();\n";
+        s << "    // Manual means \"do not RE-arm after a loss\", never \"do not arm\".\n";
+        s << "    void setRestartPolicy(logos::RestartPolicy policy);\n";
+        s << "    // Revive held subscriptions. Safe from inside the status callback.\n";
+        s << "    bool rearmSubscriptions();\n";
+        s << "\n";
+    }
 
     for (const MethodDecl& mtd : module.methods) {
         const QString ret = isVoid(mtd.returnType)
@@ -1095,7 +1118,8 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     for (const EventDecl& ev : module.events) {
         if (ev.name.empty()) continue;
         s << "bool " << className << "::" << eventAccessor(ev.name)
-          << "(std::function<void(" << eventCbParams(module, ev) << ")> callback) {\n";
+          << "(std::function<void(" << eventCbParams(module, ev)
+          << ")> callback) {\n";
         s << "    if (!callback) {\n";
         s << "        qWarning() << \"" << className << ": ignoring empty event callback for\" "
           << "<< QStringLiteral(\"" << qs(ev.name) << "\");\n";
@@ -1121,6 +1145,24 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << args.join(", ");
         s << ");\n";
         s << "    });\n";
+        s << "}\n\n";
+    }
+
+    // The per-module subscription-state forwarders, emitted only when the
+    // module has events.
+    if (!module.events.empty()) {
+        s << "void " << className << "::onSubscriptionStatus("
+          << "std::function<void(logos::SubStatus, std::uint64_t)> cb) {\n";
+        s << "    logos::qt::onSubscriptionStatus(m_bridge, std::move(cb));\n";
+        s << "}\n\n";
+        s << "std::uint64_t " << className << "::subscriptionGeneration() {\n";
+        s << "    return logos::qt::subscriptionGeneration(m_bridge);\n";
+        s << "}\n\n";
+        s << "void " << className << "::setRestartPolicy(logos::RestartPolicy policy) {\n";
+        s << "    logos::qt::setRestartPolicy(m_bridge, policy);\n";
+        s << "}\n\n";
+        s << "bool " << className << "::rearmSubscriptions() {\n";
+        s << "    return logos::qt::rearmSubscriptions(m_bridge);\n";
         s << "}\n\n";
     }
 

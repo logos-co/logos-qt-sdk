@@ -323,6 +323,40 @@ inline bool subscribe(LpBridge* bridge,
     return bridge->keep(bridge->client().subscribe(event, std::move(cb)));
 }
 
+// The target's subscription state, forwarded to the bridge's client.
+//
+// Per MODULE rather than per subscription, because that is the granularity the
+// runtime has: an LpBridge is (this module, one target), every subscribe()
+// through it attaches to that target's single handle, and a provider that dies
+// takes all of them down together.
+//
+// keep() still parks each subscription handle for the process lifetime, exactly
+// as before — the Qt consumer never owned it and still does not. These give the
+// author the state that handle would otherwise have carried.
+
+inline void onSubscriptionStatus(LpBridge* bridge,
+                                 std::function<void(logos::SubStatus, std::uint64_t)> cb)
+{
+    if (!bridge) return;
+    bridge->client().onSubscriptionStatus(std::move(cb));
+}
+
+inline std::uint64_t subscriptionGeneration(LpBridge* bridge)
+{
+    return bridge ? bridge->client().subscriptionGeneration() : 0;
+}
+
+inline void setRestartPolicy(LpBridge* bridge, logos::RestartPolicy policy)
+{
+    if (!bridge) return;
+    bridge->client().setRestartPolicy(policy);
+}
+
+inline bool rearmSubscriptions(LpBridge* bridge)
+{
+    return bridge && bridge->client().rearmSubscriptions();
+}
+
 }  // namespace qt
 }  // namespace logos
 
