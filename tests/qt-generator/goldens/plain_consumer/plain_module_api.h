@@ -94,6 +94,11 @@ public:
     void versionAsync(std::function<void(QString)> callback, Timeout timeout = Timeout());
     void versionAsyncResult(std::function<void(logos::AsyncResult<QString>)> callback, Timeout timeout = Timeout());
 
+    // Is this module reachable right now? Local, no round trip. True also
+    // when the transport cannot tell cheaply, so it can save a deadline but
+    // never skip a module that is there.
+    bool available();
+
 private:
     LogosAPI* m_api;
     QString m_moduleName;

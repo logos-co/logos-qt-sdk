@@ -98,6 +98,10 @@ PlainModule::PlainModule(const QString& origin)
     : m_moduleName(QStringLiteral("plain_module")),
       m_bridge(logos::qt::LpBridge::forOrigin(origin, QStringLiteral("plain_module"))) {}
 
+bool PlainModule::available() {
+    return m_bridge->client().available();
+}
+
 bool PlainModule::on(const QString& eventName, RawEventCallback callback) {
     if (!callback) {
         qWarning() << "PlainModule: ignoring empty event callback for" << eventName;
