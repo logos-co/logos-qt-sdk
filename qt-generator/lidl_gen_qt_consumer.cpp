@@ -735,6 +735,16 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
         s << "    void " << qs(mtd.name) << "AsyncResult(" << asyncResult.join(", ") << ");\n";
     }
 
+    // Presence, for `optional_dependencies`. Emitted on every wrapper: the
+    // generator is handed the same shape for both dependency kinds, and a
+    // required dependency asking is merely always true.
+    s << "\n    // Is this module reachable right now? Local, no round trip. True also\n";
+    s << "    // when the transport cannot tell cheaply, so it can save a deadline but\n";
+    s << "    // never skip a module that is there.\n";
+    // DECLARED here, defined in the source: LpBridge is only forward-declared
+    // in this header, so an inline body would not compile.
+    s << "    bool available();\n";
+
     s << "\nprivate:\n";
     if (!noApi) s << "    LogosAPI* m_api;\n";
     s << "    QString m_moduleName;\n";
@@ -1089,6 +1099,13 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         s << "      m_bridge(logos::qt::LpBridge::forTarget(api, QStringLiteral(\""
           << moduleName << "\"))) {}\n\n";
     }
+
+    // Presence. Goes through the bridge's LpClient, which is the same client
+    // every call on this wrapper uses — so the answer is about the connection
+    // the call would actually take.
+    s << "bool " << className << "::available() {\n";
+    s << "    return m_bridge->client().available();\n";
+    s << "}\n\n";
 
     // Untyped subscription channel. Same signature, same "subscribe once,
     // delivered for the module's lifetime" contract; the payload is decoded by

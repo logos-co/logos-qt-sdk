@@ -99,6 +99,10 @@ PlainModule::PlainModule(LogosAPI* api)
       m_moduleName(QStringLiteral("plain_module")),
       m_bridge(logos::qt::LpBridge::forTarget(api, QStringLiteral("plain_module"))) {}
 
+bool PlainModule::available() {
+    return m_bridge->client().available();
+}
+
 bool PlainModule::on(const QString& eventName, RawEventCallback callback) {
     if (!callback) {
         qWarning() << "PlainModule: ignoring empty event callback for" << eventName;

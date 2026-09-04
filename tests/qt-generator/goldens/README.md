@@ -18,6 +18,19 @@ logos-qt-generator --lidl fixtures/plain_module.lidl --backend consumer \
 
 ## History
 
+### logos-protocol 0.10 — `available()` on every consumer wrapper
+
+Reviewed, then regenerated. The diff is one declaration in the header and one
+definition in the source, forwarding to `LpBridge::client().available()` —
+nothing else moved, which is the property this fixture exists to check.
+
+Emitted on EVERY wrapper, not only on the ones a module declares under
+`optional_dependencies`. The generator is handed the same contract for both
+dependency kinds and cannot tell them apart: optionality is a property of the
+DECLARATION, not of the interface. A required dependency asking is merely always
+true.
+
+
 ### logos-protocol 0.9 — per-MODULE subscription state
 
 Reviewed, then regenerated. This entry REPLACES a short-lived one that recorded
