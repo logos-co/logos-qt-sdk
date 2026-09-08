@@ -101,12 +101,15 @@ TEST_F(QtHostCoreTest, QStringArgumentsReachTheStdLayer)
 {
     QtLogosCore core(0, nullptr, LogosCore::Config{});
     EXPECT_TRUE(core.loadModule(QStringLiteral("alpha")));
-    EXPECT_EQ(g_lastLoadDeps, static_cast<int>(LOGOS_LOAD_REQUIRED_DEPS))
-        << "the Qt default must stay what `withDependencies = true` meant";
-
-    EXPECT_TRUE(core.loadModule(QStringLiteral("alpha"), LOGOS_LOAD_REQUIRED_AND_OPTIONAL));
     EXPECT_EQ(g_lastLoadDeps, static_cast<int>(LOGOS_LOAD_REQUIRED_AND_OPTIONAL))
-        << "the new mode must reach the C API through both wrappers";
+        << "the Qt default must track the one in logos_host_core.h, or the two "
+           "layers disagree about what loadModule(name) means";
+
+    // Probe with the mode FURTHEST from the default, or an explicit argument
+    // that is silently dropped still reads as a pass.
+    EXPECT_TRUE(core.loadModule(QStringLiteral("alpha"), LOGOS_LOAD_MODULE_ONLY));
+    EXPECT_EQ(g_lastLoadDeps, static_cast<int>(LOGOS_LOAD_MODULE_ONLY))
+        << "an explicit mode must reach the C API through both wrappers";
 
     EXPECT_TRUE(core.optionalLoadReportJson(QStringLiteral("alpha")).contains("extra"));
     EXPECT_TRUE(core.unloadModule(QStringLiteral("alpha")));

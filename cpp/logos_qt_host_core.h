@@ -129,10 +129,12 @@ public:
 
     // `deps` is logos-cpp-sdk's LogosLoadDeps, forwarded rather than mirrored:
     // this file includes that header, so there is one definition and a stale
-    // copy here is not possible. The default is the required tree, which is
-    // what `withDependencies = true` meant before the parameter became an enum.
+    // copy here is not possible. The default follows that header's — the
+    // required tree PLUS whichever optional dependencies are installed. None
+    // of the optional half can fail the call; ask optionalLoadReportJson()
+    // which ones were left out.
     bool loadModule(const QString& name,
-                    LogosLoadDeps deps = LOGOS_LOAD_REQUIRED_DEPS)
+                    LogosLoadDeps deps = LOGOS_LOAD_REQUIRED_AND_OPTIONAL)
     {
         return m_core.loadModule(name.toStdString(), deps);
     }
