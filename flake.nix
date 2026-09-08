@@ -63,9 +63,19 @@
   outputs = { self, nixpkgs, logos-nix, logos-protocol, logos-lidl, logos-cpp-sdk, logos-plugin-qt }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
+
+      # logos-nix's crates.io fixes. Without them this flake builds a SECOND,
+      # un-overlaid Qt, so a module closure ends up carrying two qtdeclaratives
+      # and still fetching crate sources from the endpoint crates.io 403s.
+      # Windows takes mkWindowsPkgs, which owns its own overlay list.
+      mkPkgs = system: import nixpkgs {
+        inherit system;
+        overlays = logos-nix.lib.nativeOverlays;
+      };
+
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         inherit system;
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = mkPkgs system;
         protocolLib = logos-protocol.packages.${system}.logos-protocol-lib;
         cppGenerator = logos-cpp-sdk.packages.${system}.cpp-generator;
         # Headers only — the base SDK's include set, needed by the test suite's
@@ -91,7 +101,7 @@
             isWin = system == "x86_64-windows";
             pkgs =
               if isWin then logos-nix.lib.mkWindowsPkgs { buildSystem = windowsBuildSystem; }
-              else import nixpkgs { inherit system; };
+              else mkPkgs system;
             protocolLib = logos-protocol.packages.${system}.logos-protocol-lib;
           in
           f {
