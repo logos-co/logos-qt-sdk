@@ -499,11 +499,6 @@ TypeExpr effectiveFieldType(const FieldDecl& f)
 // parameter is always named. A predicate that is constantly true is a place for
 // a future reader to wonder whether it might not be.
 
-bool isVoid(const TypeExpr& te)
-{
-    return (te.kind == TypeExpr::Primitive || te.kind == TypeExpr::Named) && te.name == "void";
-}
-
 // `on` + the event name with its first letter capitalised. NOT PascalCase:
 // `userLoggedIn` must stay `onUserLoggedIn`, not `onUserloggedin`.
 QString eventAccessor(const std::string& evName)
@@ -541,7 +536,7 @@ bool moduleUsesStdOptional(const ModuleDecl& m)
             if (typeUsesStdOptional(eff)) return true;
         }
     for (const MethodDecl& md : m.methods) {
-        if (typeUsesStdOptional(md.returnType)) return true;
+        if (md.returnType && typeUsesStdOptional(*md.returnType)) return true;
         for (const ParamDecl& p : md.params) if (typeUsesStdOptional(p.type)) return true;
     }
     for (const EventDecl& ed : m.events)
@@ -696,9 +691,9 @@ QString lidlMakeQtConsumerHeader(const ModuleDecl& module,
     }
 
     for (const MethodDecl& mtd : module.methods) {
-        const QString ret = isVoid(mtd.returnType)
+        const QString ret = !mtd.returnType
                                 ? QStringLiteral("void")
-                                : surfaceType(module, mtd.returnType, QString(), false);
+                                : surfaceType(module, *mtd.returnType, QString(), false);
         QStringList params;
         for (const ParamDecl& p : mtd.params) params << declParam(module, p.type, qs(p.name));
 
@@ -847,7 +842,7 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     // static function.
     const bool anyReturnDecodes = [&] {
         for (const MethodDecl& mtd : module.methods)
-            if (!isVoid(mtd.returnType) && decodeUsesSink(module, mtd.returnType)) return true;
+            if (mtd.returnType && decodeUsesSink(module, *mtd.returnType)) return true;
         return false;
     }();
     // A LogosResult RETURN is the one shape whose default-constructed value is
@@ -857,8 +852,8 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     // false for it and the sink machinery never sees it.
     const bool anyReturnIsResult = [&] {
         for (const MethodDecl& mtd : module.methods)
-            if (!isVoid(mtd.returnType)
-                && surfaceType(module, mtd.returnType, QString(), false)
+            if (mtd.returnType
+                && surfaceType(module, *mtd.returnType, QString(), false)
                        == QLatin1String("LogosResult"))
                 return true;
         return false;
@@ -1171,11 +1166,11 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
     // be separate tables that converted the same type differently, and there is
     // now nothing left for them to disagree about.
     for (const MethodDecl& mtd : module.methods) {
-        const bool retVoid = isVoid(mtd.returnType);
+        const bool retVoid = !mtd.returnType;
         const QString ret = retVoid ? QStringLiteral("void")
-                                    : surfaceType(module, mtd.returnType, QString(), false);
+                                    : surfaceType(module, *mtd.returnType, QString(), false);
         const QString retQual = retVoid ? QStringLiteral("void")
-                                        : surfaceType(module, mtd.returnType, qual, false);
+                                        : surfaceType(module, *mtd.returnType, qual, false);
 
         QStringList params;
         for (const ParamDecl& p : mtd.params) params << declParam(module, p.type, qs(p.name));
@@ -1189,7 +1184,7 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
         // Can decoding this method's ANSWER reject? Only then does the body
         // grow an error sink and the fold below it. A method returning a
         // scalar, `any` or void emits exactly the lines it always did.
-        const bool retDecodes = !retVoid && decodeUsesSink(module, mtd.returnType);
+        const bool retDecodes = !retVoid && decodeUsesSink(module, *mtd.returnType);
         // NOT `&& retDecodes`: `result` is a bare primitive, so the sink
         // machinery is not on this path at all. See logosResultFromReply.
         const bool retIsResult = !retVoid && ret == QLatin1String("LogosResult");
@@ -1231,12 +1226,12 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             // `&err`, and the two are distinct.
             s << "    std::string _derr;\n";
             s << "    " << declareSink("&_derr") << "\n";
-            s << "    " << retQual << " _out = " << fromWire(module, mtd.returnType, "_r", qual)
+            s << "    " << retQual << " _out = " << fromWire(module, *mtd.returnType, "_r", qual)
               << ";\n";
             s << "    if (err) logosNoteDecodeFailure(_derr, m_moduleName.toStdString(), *err);\n";
             s << "    return _out;\n";
         } else if (!retVoid) {
-            s << "    return " << fromWire(module, mtd.returnType, "_r", qual) << ";\n";
+            s << "    return " << fromWire(module, *mtd.returnType, "_r", qual) << ";\n";
         } else {
             s << "    (void)_r;\n";
         }
@@ -1283,7 +1278,7 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
                 s << "            callback(_out);\n";
             } else {
                 if (retDecodes) s << "            " << declareSink("nullptr") << "\n";
-                s << "            callback(" << fromWire(module, mtd.returnType, "_r", qual) << ");\n";
+                s << "            callback(" << fromWire(module, *mtd.returnType, "_r", qual) << ");\n";
             }
         }
         s << "        }, timeout.ms);\n";
@@ -1326,7 +1321,7 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             // overload asked for the error by choosing it.
             s << "            std::string _derr;\n";
             s << "            " << declareSink("&_derr") << "\n";
-            s << "            _res.value = " << fromWire(module, mtd.returnType, "_r", qual)
+            s << "            _res.value = " << fromWire(module, *mtd.returnType, "_r", qual)
               << ";\n";
             s << "            logosNoteDecodeFailure(_derr, _target, _res.error);\n";
         } else if (retIsResult) {
@@ -1334,7 +1329,7 @@ QString lidlMakeQtConsumerSource(const ModuleDecl& module,
             // and for LogosResult that default is a provider answer.
             s << "            logosResultFromReply(_r, _res.error, _target, _res.value);\n";
         } else {
-            s << "            _res.value = " << fromWire(module, mtd.returnType, "_r", qual) << ";\n";
+            s << "            _res.value = " << fromWire(module, *mtd.returnType, "_r", qual) << ";\n";
         }
         s << "            callback(_res);\n";
         s << "        }, timeout.ms);\n";
