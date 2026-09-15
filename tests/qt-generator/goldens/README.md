@@ -18,6 +18,19 @@ logos-qt-generator --lidl fixtures/plain_module.lidl --backend consumer \
 
 ## History
 
+### logos-protocol 0.10 — `available()` on every consumer wrapper
+
+Reviewed, then regenerated. The diff is one declaration in the header and one
+definition in the source, forwarding to `LpBridge::client().available()` —
+nothing else moved, which is the property this fixture exists to check.
+
+Emitted on EVERY wrapper, not only on the ones a module declares under
+`optional_dependencies`. The generator is handed the same contract for both
+dependency kinds and cannot tell them apart: optionality is a property of the
+DECLARATION, not of the interface. A required dependency asking is merely always
+true.
+
+
 ### logos-protocol 0.9 — per-MODULE subscription state
 
 Reviewed, then regenerated. This entry REPLACES a short-lived one that recorded
@@ -105,6 +118,12 @@ Both goldens grew by exactly the same 68 source lines and 6 header lines —
 the two methods with their three standard overloads each, appended — and
 nothing already there changed. Pure addition, zero deletions, which is what a
 contract gaining two methods should look like here.
+
+Refreshed again for the third derived built-in, `lidl()`. Both bindings grew by
+the same 34 source lines and 3 header lines: the synchronous, value-only async,
+and error-carrying async overloads, appended after `version()`. No existing
+line changed. The LIDL `tstr` return maps to `QString`, just like `name()` and
+`version()`; the returned value is the module's canonical interface document.
 
 Refreshed once more for the widened provider-rejection detector. Both goldens
 changed by exactly the same 4-line hunk in `plain_module_api.cpp`, and nothing

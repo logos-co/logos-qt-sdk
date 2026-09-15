@@ -202,10 +202,10 @@ int main(int argc, char* argv[])
     }
 
     {
-        // Every module answers name()/version(), so every consumer wrapper
-        // offers them. Added here rather than read from the contract: the
-        // .lidl carries only what the author wrote, and the provider adds the
-        // same two methods from the same frontend function.
+        // Every module answers name()/version()/lidl(), so every consumer
+        // wrapper offers them. Added after parsing: the canonical .lidl carries
+        // only the authored API, and providers add the same built-ins from the
+        // shared frontend.
         QString idErr;
         if (!lidlInjectIdentity(mod, &idErr)) {
             err << (fromHeader ? headerPath : lidlPath) << ": " << idErr << "\n";

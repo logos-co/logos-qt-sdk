@@ -92,6 +92,9 @@ public:
     QString version(logos::CallError* err = nullptr, Timeout timeout = Timeout());
     void versionAsync(std::function<void(QString)> callback, Timeout timeout = Timeout());
     void versionAsyncResult(std::function<void(logos::AsyncResult<QString>)> callback, Timeout timeout = Timeout());
+    QString lidl(logos::CallError* err = nullptr, Timeout timeout = Timeout());
+    void lidlAsync(std::function<void(QString)> callback, Timeout timeout = Timeout());
+    void lidlAsyncResult(std::function<void(logos::AsyncResult<QString>)> callback, Timeout timeout = Timeout());
 
 private:
     QString m_moduleName;

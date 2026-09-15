@@ -779,3 +779,37 @@ void PlainModule::versionAsyncResult(std::function<void(logos::AsyncResult<QStri
         }, timeout.ms);
 }
 
+QString PlainModule::lidl(logos::CallError* err, Timeout timeout) {
+    nlohmann::json _args = nlohmann::json::array();
+    logos::CallError _err;
+    nlohmann::json _r = logos::qt::invoke(m_bridge, "lidl", _args, &_err, timeout.ms);
+    if (_err.ok()) logosDispatchRejectionJson(_r, _err);
+    if (err) *err = _err;
+    else if (!_err.ok()) qWarning() << "PlainModule::lidl: remote call failed:" << QString::fromStdString(_err.message);
+    return logos::qt::fromWire<QString>(_r);
+}
+
+void PlainModule::lidlAsync(std::function<void(QString)> callback, Timeout timeout) {
+    if (!callback) return;
+    nlohmann::json _args = nlohmann::json::array();
+    logos::qt::invokeAsync(m_bridge, "lidl", _args,
+        [callback](nlohmann::json _r) {
+            { logos::CallError _rej; if (logosDispatchRejectionJson(_r, _rej))
+                  qWarning() << "PlainModule::lidlAsync: remote call failed:" << QString::fromStdString(_rej.message); }
+            callback(logos::qt::fromWire<QString>(_r));
+        }, timeout.ms);
+}
+
+void PlainModule::lidlAsyncResult(std::function<void(logos::AsyncResult<QString>)> callback, Timeout timeout) {
+    if (!callback) return;
+    nlohmann::json _args = nlohmann::json::array();
+    logos::qt::invokeAsyncResult(m_bridge, "lidl", _args,
+        [callback](nlohmann::json _r, const logos::CallError& _err) {
+            logos::AsyncResult<QString> _res;
+            _res.error = _err;
+            if (_res.error.ok()) logosDispatchRejectionJson(_r, _res.error);
+            _res.value = logos::qt::fromWire<QString>(_r);
+            callback(_res);
+        }, timeout.ms);
+}
+
