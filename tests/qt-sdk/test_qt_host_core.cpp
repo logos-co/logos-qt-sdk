@@ -14,8 +14,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -23,6 +26,9 @@ namespace {
 struct CoreStub {
     std::vector<std::string> known{"alpha", "beta"};
     std::vector<std::string> loaded{"alpha"};
+    // core_service over the shell binding: the calls made, one answer per method.
+    std::vector<std::pair<std::string, std::string>> coreServiceCalls;
+    std::map<std::string, std::string> answers;
     std::string statsJson =
         R"([{"name":"alpha","cpu_percent":7.25,"cpu_time_seconds":1.5,)"
         R"("memory_mb":8192.0,"extra":"kept","flag":true}])";
@@ -81,6 +87,37 @@ char* logos_core_get_modules_info()          { return dupC("[]"); }
 char* logos_core_process_module(const char*) { return dupC("ok"); }
 char* logos_core_get_token(const char*)      { return g->tokenPresent ? dupC("tok") : nullptr; }
 char* logos_core_get_module_stats()          { return dupC(g->statsJson); }
+void logos_core_set_token_listener(LogosCoreTokenListener, void*) {}
+int logos_core_set_bundled_modules_dirs(const char* const*) { return 0; }
+int logos_core_set_placement_policy(const char*) { return 0; }
+int logos_core_set_shell_identity(const char*) { return 0; }
+int logos_core_set_package_config(const char*) { return 0; }
+
+char gBindingTag;
+char* mallocCopy(const std::string& s)
+{
+    char* r = static_cast<char*>(std::malloc(s.size() + 1));
+    std::memcpy(r, s.c_str(), s.size() + 1);
+    return r;
+}
+logos_consumer* logos_core_take_shell_binding(void) { return reinterpret_cast<logos_consumer*>(&gBindingTag); }
+const char* logos_consumer_name(const logos_consumer*) { return "basecamp"; }
+char* logos_consumer_credential(const logos_consumer*) { return mallocCopy("shell-cr"); }
+int logos_consumer_call(logos_consumer*, const char*, const char* method, const char* args, int,
+                        char** out, char** err)
+{
+    g->coreServiceCalls.emplace_back(method, args);
+    const auto it = g->answers.find(method);
+    if (it == g->answers.end()) return -1;
+    *out = mallocCopy(it->second);
+    *err = nullptr;
+    return 0;
+}
+logos_consumer_subscription* logos_consumer_subscribe(logos_consumer*, const char*, const char*,
+                                                      logos_consumer_event_cb, void*) { return nullptr; }
+void logos_consumer_unsubscribe(logos_consumer_subscription*) {}
+void logos_consumer_string_free(char* value) { std::free(value); }
+void logos_consumer_release(logos_consumer*) {}
 }
 
 namespace {
@@ -150,6 +187,30 @@ TEST_F(QtHostCoreTest, AbsentTokenIsEmptyQStringAndTheDistinctionStaysReachable)
     // The Qt layer flattens nullopt to an empty QString, which is lossy. The
     // escape hatch to the std layer must keep the distinction available.
     EXPECT_FALSE(core.core().token("core").has_value());
+}
+
+TEST_F(QtHostCoreTest, AShellAdmitsItsUiPluginsInQtTypes)
+{
+    stub.answers = {
+        {"admitConsumer", R"({"status":"ok","name":"my_ui","credential":"cred-1"})"},
+        {"retireConsumer", R"({"status":"ok","name":"my_ui"})"},
+        {"loadModule", R"({"status":"ok","module":"alpha"})"},
+    };
+    g_lastLoadDeps = -1;
+    LogosCore::Config cfg;
+    cfg.shellName = "basecamp";
+    QtLogosCore core(0, nullptr, std::move(cfg));
+    EXPECT_FALSE(core.shellBound()) << "the binding comes with start()";
+    core.start();
+    ASSERT_TRUE(core.shellBound());
+    EXPECT_EQ(core.shellCredential(), QStringLiteral("shell-cr"));
+    EXPECT_EQ(core.admitConsumer(QStringLiteral("my_ui")), QStringLiteral("cred-1"));
+    EXPECT_TRUE(core.retireConsumer(QStringLiteral("my_ui")));
+    EXPECT_TRUE(core.loadModule(QStringLiteral("alpha")));
+    EXPECT_EQ(g_lastLoadDeps, -1) << "a bound shell loads through core_service";
+    ASSERT_EQ(stub.coreServiceCalls.size(), 3u);
+    EXPECT_EQ(stub.coreServiceCalls[2],
+              (std::pair<std::string, std::string>{"loadModule", R"(["alpha","required"])"}));
 }
 
 TEST_F(QtHostCoreTest, MalformedStatsDoesNotThrowThroughTheQtLayer)

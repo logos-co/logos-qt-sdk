@@ -127,6 +127,27 @@ public:
     void start()          { m_core.start(); }
     bool isStarted() const { return m_core.isStarted(); }
 
+    // ── The shell identity (Config::shellName) ──────────────────────────────
+    // Empty QStrings where the std layer answers nullopt: no binding, or refused.
+
+    bool shellBound() const { return m_core.shellBound(); }
+
+    QString shellCredential() const
+    {
+        const auto v = m_core.shellCredential();
+        return v ? QString::fromStdString(*v) : QString();
+    }
+
+    // A UI plugin's credential, minted by capability_module; hand it to
+    // logos::adoptAdmittedConsumer and to the plugin's ui-host.
+    QString admitConsumer(const QString& name)
+    {
+        const auto v = m_core.admitConsumer(name.toStdString());
+        return v ? QString::fromStdString(*v) : QString();
+    }
+
+    bool retireConsumer(const QString& name) { return m_core.retireConsumer(name.toStdString()); }
+
     // `deps` is logos-cpp-sdk's LogosLoadDeps, forwarded rather than mirrored:
     // this file includes that header, so there is one definition and a stale
     // copy here is not possible. The default is the required tree, which is
