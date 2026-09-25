@@ -91,6 +91,7 @@ void logos_core_set_token_listener(LogosCoreTokenListener, void*) {}
 int logos_core_set_bundled_modules_dirs(const char* const*) { return 0; }
 int logos_core_set_placement_policy(const char*) { return 0; }
 int logos_core_set_shell_identity(const char*) { return 0; }
+int logos_core_set_package_config(const char*) { return 0; }
 
 char gBindingTag;
 char* mallocCopy(const std::string& s)
