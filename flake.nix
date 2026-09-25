@@ -55,7 +55,7 @@
     # now ships logos_host_core.h and the rest of the capability split that
     # cpp/CMakeLists.txt requires. The rev pin existed only to bridge that gap.
     logos-cpp-sdk = {
-      url = "github:logos-co/logos-cpp-sdk/feat/drop-legacy-mode";
+      url = "github:logos-co/logos-cpp-sdk/feat/runtime-process";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
