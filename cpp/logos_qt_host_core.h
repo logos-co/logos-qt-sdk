@@ -39,6 +39,7 @@
 #include <QVariant>
 #include <QVariantMap>
 
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -128,6 +129,18 @@ public:
 
     void start()          { m_core.start(); }
     bool isStarted() const { return m_core.isStarted(); }
+
+    // Whether the runtime runs in a process of its own (Config::separateProcess).
+    bool separateProcess() const { return m_core.separateProcess(); }
+
+    // Called once, on a liblogos thread, if that runtime exits before this
+    // object stops it. It must not block: post to the GUI thread from it.
+    void onRuntimeExit(std::function<void(const QString& reason)> callback)
+    {
+        m_core.onRuntimeExit([callback = std::move(callback)](const std::string& reason) {
+            if (callback) callback(QString::fromStdString(reason));
+        });
+    }
 
     // ── The shell identity (Config::shellName, required) ────────────────────
     // Empty QStrings where the std layer answers nullopt: not started, or refused.
