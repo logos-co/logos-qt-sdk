@@ -13,7 +13,7 @@
     # Runtime-control wave: protocol 0.13, plugin-qt's adoption verbs and
     # cpp-sdk's shell-bound LogosCore; back to master as they merge.
     logos-protocol = {
-      url = "github:logos-co/logos-protocol/feat/plain-local-inproc";
+      url = "github:logos-co/logos-protocol/feat/drop-legacy-mode";
       inputs.logos-nix.follows = "logos-nix";
     };
     # The canonical, language-neutral LIDL frontend the qt-generator links.
@@ -37,7 +37,7 @@
     # it. The three `follows` above stay — they are what keeps one logos-protocol
     # in the closure, and that is independent of pinning.
     logos-plugin-qt = {
-      url = "github:logos-co/logos-plugin-qt/feat/consumer-adoption-only";
+      url = "github:logos-co/logos-plugin-qt/feat/drop-legacy-mode";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
@@ -55,7 +55,7 @@
     # now ships logos_host_core.h and the rest of the capability split that
     # cpp/CMakeLists.txt requires. The rev pin existed only to bridge that gap.
     logos-cpp-sdk = {
-      url = "github:logos-co/logos-cpp-sdk/feat/core-service-client";
+      url = "github:logos-co/logos-cpp-sdk/feat/drop-legacy-mode";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";

@@ -4,9 +4,9 @@
 // logos_qt_host_core.h — Qt marshalling over logos::host::LogosCore.
 //
 // The HOST capability, Qt-typed. logos-cpp-sdk's `logos_host_core.h` owns the
-// substance — RAII around logos_core_init/cleanup, the `delete[]`-not-`free()`
-// ownership rules, the pre-start ordering constraint, and the module-stats blob
-// parse. This adds exactly one thing: std ⇄ Qt conversion at the boundary, so a
+// substance — RAII around logos_core_init/cleanup, the pre-start ordering
+// constraint, the shell binding every call goes through (core_service), and the
+// module-stats parse. This adds exactly one thing: std ⇄ Qt conversion at the boundary, so a
 // Qt host writes `QStringList` and `QVariantMap` instead of converting at every
 // call site.
 //
@@ -105,6 +105,8 @@ inline QVariantMap toQVariantMap(const host::ModuleStats& s)
 // (the wrapped type is).
 //
 //     logos::host::LogosCore::Config cfg;
+//     cfg.shellName = "my_app";   // required
+//     cfg.bundledModulesDirs = { bundledDir.toStdString() };
 //     cfg.modulesDirs = { modulesDir.toStdString() };
 //
 //     logos::qt::QtLogosCore core(argc, argv, std::move(cfg));
@@ -127,8 +129,8 @@ public:
     void start()          { m_core.start(); }
     bool isStarted() const { return m_core.isStarted(); }
 
-    // ── The shell identity (Config::shellName) ──────────────────────────────
-    // Empty QStrings where the std layer answers nullopt: no binding, or refused.
+    // ── The shell identity (Config::shellName, required) ────────────────────
+    // Empty QStrings where the std layer answers nullopt: not started, or refused.
 
     bool shellBound() const { return m_core.shellBound(); }
 
@@ -196,14 +198,8 @@ public:
         return v.has_value() ? QString::fromStdString(*v) : QString();
     }
 
-    QString token(const QString& key) const
-    {
-        const auto v = m_core.token(key.toStdString());
-        return v.has_value() ? QString::fromStdString(*v) : QString();
-    }
-
-    // Empty map when the module is not loaded. One C call + one parse; for a
-    // whole list use allStats() rather than looping this.
+    // Empty map when the module is not loaded. One core_service call + one
+    // parse; for a whole list use allStats() rather than looping this.
     QVariantMap moduleStats(const QString& moduleName) const
     {
         const auto s = m_core.stats(moduleName.toStdString());
