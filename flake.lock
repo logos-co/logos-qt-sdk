@@ -18,16 +18,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1790367644,
-        "narHash": "sha256-DzUa5J2wbp3D4qF6Lzlv2tlDqBRDJdNxDCiOq295Tys=",
+        "lastModified": 1790387185,
+        "narHash": "sha256-jtIWfMX+nIZ6qQpTzK9LDWDLWF0NAsPrau994N5Y9u0=",
         "owner": "logos-co",
         "repo": "logos-cpp-sdk",
-        "rev": "e106edb9a44e80511b2c11449e91d32348b90d34",
+        "rev": "1c53de5c670b2ae04afa12e840e50671d904fcf4",
         "type": "github"
       },
       "original": {
         "owner": "logos-co",
-        "ref": "feat/runtime-process",
+        "ref": "feat/peering",
         "repo": "logos-cpp-sdk",
         "type": "github"
       }
@@ -138,16 +138,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1790348415,
-        "narHash": "sha256-vGfOzue4HJjnMmSsPY01OizzZEKBdDHjmpKg9LpWHL0=",
+        "lastModified": 1790387097,
+        "narHash": "sha256-4Udly+blX8KoxFmVtRDwVWiYP4ovZ0l8j2p1nRpxN+U=",
         "owner": "logos-co",
         "repo": "logos-plugin-qt",
-        "rev": "4f7bccee0366ea3f9c0044ac1a2f7cefa48ef319",
+        "rev": "20f9d46a53892a39debfc3738f6cff9289ffde48",
         "type": "github"
       },
       "original": {
         "owner": "logos-co",
-        "ref": "feat/drop-legacy-mode",
+        "ref": "feat/peering",
         "repo": "logos-plugin-qt",
         "type": "github"
       }
@@ -164,16 +164,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1790348792,
-        "narHash": "sha256-BViWI8U+v0MNyOpsMv09Zs2lKiwA0LpeRPCUV6kvmVA=",
+        "lastModified": 1790386946,
+        "narHash": "sha256-D//DEzaGaYyUB71z3oG3IUm3u75C42cpuizJpqEp/P0=",
         "owner": "logos-co",
         "repo": "logos-protocol",
-        "rev": "23684fd95d4fb2c863f32f7f747254399ba319a8",
+        "rev": "ce4390408e01daecedd44b96e2851a7f9d9bf0fe",
         "type": "github"
       },
       "original": {
         "owner": "logos-co",
-        "ref": "feat/drop-legacy-mode",
+        "ref": "feat/peering",
         "repo": "logos-protocol",
         "type": "github"
       }
