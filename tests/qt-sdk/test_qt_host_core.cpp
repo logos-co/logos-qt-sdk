@@ -71,6 +71,7 @@ int logos_core_set_bundled_modules_dirs(const char* const*) { return 0; }
 int logos_core_set_placement_policy(const char*) { return 0; }
 int logos_core_set_shell_identity(const char*) { return 0; }
 int logos_core_set_package_config(const char*) { return 0; }
+int logos_core_set_peering_config(const char*) { return 0; }
 
 char gBindingTag;
 logos_consumer* logos_core_take_shell_binding(void) { return reinterpret_cast<logos_consumer*>(&gBindingTag); }
