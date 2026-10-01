@@ -43,12 +43,10 @@ namespace {
 //                       cdylib dispatch and logos-rust-sdk's args::invalid_args,
 //                       and until now detected by nobody: an arity error read
 //                       back as a successful call returning a map.
-//   "unknown_method"  — nothing emits this yet, deliberately listed anyway.
-//                       An unknown method is currently answered with a bare
-//                       null (logos-protocol logos_protocol.h), and fixing that
-//                       is a provider-contract change. Widening a detector is
-//                       backwards-compatible on its own; a new provider code
-//                       shipped against narrow detectors would arrive as DATA.
+//   "unknown_method"  — no method by that NAME. Generated providers, the Qt
+//                       host glue and QtProviderObject answer it; they used to
+//                       answer a bare null. It was listed before any provider
+//                       emitted it, so it never reached a consumer as DATA.
 const char* const kRejectionCodes[] = {
     "dispatch_failed", "invalid_args", "unknown_method",
 };
