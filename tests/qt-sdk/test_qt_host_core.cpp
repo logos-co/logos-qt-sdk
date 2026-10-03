@@ -96,6 +96,20 @@ logos_consumer_subscription* logos_consumer_subscribe(logos_consumer*, const cha
 void logos_consumer_unsubscribe(logos_consumer_subscription*) {}
 void logos_consumer_string_free(char* value) { std::free(value); }
 void logos_consumer_release(logos_consumer*) {}
+
+// The runtime in a process of its own, the default.
+char gRuntimeTag;
+logos_runtime_exit_cb gOnExit = nullptr;
+void* gOnExitData = nullptr;
+logos_runtime* logos_runtime_spawn(const char*, char**) { return reinterpret_cast<logos_runtime*>(&gRuntimeTag); }
+logos_consumer* logos_runtime_binding(logos_runtime*) { return reinterpret_cast<logos_consumer*>(&gBindingTag); }
+char* logos_runtime_process_module(logos_runtime*, const char*) { return mallocCopy("ok"); }
+void logos_runtime_on_exit(logos_runtime*, logos_runtime_exit_cb cb, void* data)
+{
+    gOnExit = cb;
+    gOnExitData = data;
+}
+void logos_runtime_stop(logos_runtime*) {}
 }
 
 namespace {
@@ -224,6 +238,18 @@ TEST_F(QtHostCoreTest, MalformedStatsDoesNotThrowThroughTheQtLayer)
     core.start();
     EXPECT_TRUE(core.allStats().isEmpty());
     EXPECT_TRUE(core.moduleStats(QStringLiteral("alpha")).isEmpty());
+}
+
+TEST_F(QtHostCoreTest, TheRuntimesExitReachesTheHostInQtTypes)
+{
+    QtLogosCore core(0, nullptr, shellConfig());
+    EXPECT_TRUE(core.separateProcess()) << "a separate runtime is the default";
+    QString seen;
+    core.onRuntimeExit([&](const QString& reason) { seen = reason; });
+    core.start();
+    ASSERT_NE(gOnExit, nullptr);
+    gOnExit("the runtime died on signal 9", gOnExitData);
+    EXPECT_EQ(seen, QStringLiteral("the runtime died on signal 9"));
 }
 
 } // namespace
