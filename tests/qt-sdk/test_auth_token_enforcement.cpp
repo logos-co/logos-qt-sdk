@@ -11,7 +11,7 @@
 //          closes this path too.
 //
 // ModuleProxy::callRemoteMethod is the single provider-side dispatch sink for
-// every transport (Local and plain/TCP both invoke it), so enforcement there is
+// every transport (Local, qt_remote and qt_remote_plain all invoke it), so enforcement there is
 // the choke point that authorizes both new-API (LogosProviderBase) providers and
 // legacy QObject plugins wrapped by QtProviderObject.
 
@@ -224,13 +224,13 @@ TEST_F(AuthTokenEnforcementTest, ValidatorSeesTransportAndCanEnforceLocalOnly)
 
     m_provider->lastMethodCalled.clear();
 
-    // Same token presented over tcp -> the validator rejects it, so the call
-    // is not dispatched. This is how a leaked local_only token is blocked
-    // over the network.
+    // Another label -> the validator rejects it, so the call is not dispatched.
+    // No transport of this runtime passes one since protocol 0.15 removed tcp;
+    // the 4-arg form keeps the validator's contract.
     QVariant overTcp = proxy.callRemoteMethod("local-only-tok", "privilegedMethod",
                                               {QVariant(1)}, QStringLiteral("tcp"));
     EXPECT_TRUE(logos::isUnauthorizedSentinel(overTcp))
-        << "a local_only token over tcp must be rejected with the sentinel";
+        << "a local_only validator must be able to refuse another label";
     EXPECT_TRUE(m_provider->lastMethodCalled.isEmpty());
 }
 

@@ -10,10 +10,10 @@
     # runtime needs are on master. That PR was squash-merged, so the old pin
     # c8bab12 is not an ancestor of master even though its content is in it —
     # check the FILES, not the ancestry, when retiring one of these pins.
-    # Runtime-control wave: protocol 0.13, plugin-qt's adoption verbs and
-    # cpp-sdk's shell-bound LogosCore; back to master as they merge.
+    # Protocol 0.15 (logos-protocol#102) and the plugin-qt and cpp-sdk
+    # branches stacked on it; back to master as they merge.
     logos-protocol = {
-      url = "github:logos-co/logos-protocol/feat/peering";
+      url = "github:logos-co/logos-protocol/feat/drop-legacy-remote";
       inputs.logos-nix.follows = "logos-nix";
     };
     # The canonical, language-neutral LIDL frontend the qt-generator links.
@@ -37,7 +37,7 @@
     # it. The three `follows` above stay — they are what keeps one logos-protocol
     # in the closure, and that is independent of pinning.
     logos-plugin-qt = {
-      url = "github:logos-co/logos-plugin-qt/feat/peering";
+      url = "github:logos-co/logos-plugin-qt/feat/drop-legacy-remote";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
@@ -55,7 +55,7 @@
     # now ships logos_host_core.h and the rest of the capability split that
     # cpp/CMakeLists.txt requires. The rev pin existed only to bridge that gap.
     logos-cpp-sdk = {
-      url = "github:logos-co/logos-cpp-sdk/feat/peering";
+      url = "github:logos-co/logos-cpp-sdk/feat/drop-legacy-remote";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
