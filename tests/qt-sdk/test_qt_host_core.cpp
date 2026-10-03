@@ -64,7 +64,8 @@ void logos_core_start() {}
 void logos_core_cleanup() {}
 void logos_core_add_modules_dir(const char*) {}
 void logos_core_set_persistence_base_path(const char*) {}
-void logos_core_set_access_policy(const char*) {}
+int logos_core_set_access_policy(const char*) { return 0; }
+int logos_core_set_module_config(const char*) { return 0; }
 void logos_core_set_module_transports(const char*, const char*) {}
 char* logos_core_process_module(const char*) { return dupC("ok"); }
 int logos_core_set_bundled_modules_dirs(const char* const*) { return 0; }

@@ -11,9 +11,10 @@
     # c8bab12 is not an ancestor of master even though its content is in it —
     # check the FILES, not the ancestry, when retiring one of these pins.
     # Runtime-control wave: protocol 0.13, plugin-qt's adoption verbs and
-    # cpp-sdk's shell-bound LogosCore; back to master as they merge.
+    # cpp-sdk's shell-bound LogosCore, up to method scopes and module
+    # configuration (feat/method-scopes); back to master as they merge.
     logos-protocol = {
-      url = "github:logos-co/logos-protocol/feat/drop-legacy-mode";
+      url = "github:logos-co/logos-protocol/feat/method-scopes";
       inputs.logos-nix.follows = "logos-nix";
     };
     # The canonical, language-neutral LIDL frontend the qt-generator links.
@@ -37,7 +38,7 @@
     # it. The three `follows` above stay — they are what keeps one logos-protocol
     # in the closure, and that is independent of pinning.
     logos-plugin-qt = {
-      url = "github:logos-co/logos-plugin-qt/feat/drop-legacy-mode";
+      url = "github:logos-co/logos-plugin-qt/feat/method-scopes";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
@@ -55,7 +56,7 @@
     # now ships logos_host_core.h and the rest of the capability split that
     # cpp/CMakeLists.txt requires. The rev pin existed only to bridge that gap.
     logos-cpp-sdk = {
-      url = "github:logos-co/logos-cpp-sdk/feat/runtime-process";
+      url = "github:logos-co/logos-cpp-sdk/feat/method-scopes";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-lidl.follows = "logos-lidl";
